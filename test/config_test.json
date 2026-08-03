@@ -1,0 +1,146 @@
+{
+  "_description": {
+    "provider": "Default provider name; can be overridden with --provider on the command line.",
+    "providers": {
+      "glm": "Zhipu GLM, OpenAI-compatible chat/completions format; defaults to ZHIPUAI_API_KEY.",
+      "qwen": "Qwen/Qwen-VL DashScope compatible-mode; defaults to DASHSCOPE_API_KEY.",
+      "gemini": "Gemini via Cheese API OpenAI-compatible chat/completions; defaults to GEMINI_API_KEY.",
+      "kimi": "Kimi/Moonshot OpenAI-compatible chat/completions; defaults to MOONSHOT_API_KEY.",
+      "gpt": "OpenAI GPT, OpenAI-compatible chat/completions; defaults to OPENAI_API_KEY.",
+      "seed": "ByteDance Seed/Volcengine Ark OpenAI-compatible chat/completions; defaults to ARK_API_KEY.",
+      "internvl": "InternVL typically requires a local or third-party OpenAI-compatible service; use INTERNVL_API_URL to override the address, no API key required by default.",
+      "local_internvl_8b": "Local InternVL3.5-8B weights, loaded via transformers with local frame extraction, no API key needed; use INTERNVL_MODEL_PATH or --model to point to the weights directory.",
+      "local_qwen": "Locally deployed Qwen-VL, loaded via transformers with local weights, no API key needed."
+    },
+    "media_url_format": {
+      "base64": "Place base64 string directly in OpenAI-compatible payload; suited for current GLM usage.",
+      "data_url": "Place data:<mime>;base64,... in OpenAI-compatible payload; commonly used for Qwen/OpenAI-compatible.",
+      "inline_data": "Gemini uses inline_data internally; no need to set this in config."
+    },
+    "model_override_examples": {
+      "qwen": "Use --provider qwen --model Qwen3-VL-8B-Instruct / Qwen3-VL-32B-Instruct / Qwen3-VL-30B-A3B-Instruct / Qwen3-VL-235B-A22B-Instruct / qwen3.5-omni-plus / qwen3.7-plus to switch.",
+      "seed": "Use --provider seed --model Seed2.1 or --model Seed2.0-Lite to switch.",
+      "internvl": "Use --provider internvl --model InternVL3.5-8B or --model InternVL3.5-30B-A3B to switch; set INTERNVL_API_URL if needed.",
+      "local_internvl_8b": "Use --provider local_internvl_8b; use INTERNVL_MODEL_PATH or --model /path/to/InternVL3.5-8B to point to local weights directory.",
+      "gemini": "Use --provider gemini --model gemini-3.1-pro-preview or --model gemini-3.5-flash to switch; defaults to https://cheeseapi.top/v1.",
+      "kimi": "Defaults to kimi-k2.6; use --model to override if the server model name differs.",
+      "glm": "Defaults to glm-5v-turbo; use --model to override if the server model name differs.",
+      "gpt": "Use --provider gpt --model gpt-4o / gpt-4o-mini / gpt-4.1 to switch; defaults to gpt-4o."
+    },
+    "tasks": "The four test scripts read input/output from the corresponding task section; command-line --input/--output can override."
+  },
+  "provider": "glm",
+  "defaults": {
+    "temperature": 0.0,
+    "thinking": "disabled",
+    "timeout": 180,
+    "max_retries": 3
+  },
+  "providers": {
+    "glm": {
+      "type": "openai_compatible",
+      "api_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "api_key_env": "ZHIPUAI_API_KEY",
+      "model": "glm-5v-turbo",
+      "media_url_format": "base64",
+      "thinking": "disabled",
+      "send_thinking": true
+    },
+    "qwen": {
+      "type": "openai_compatible",
+      "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "model": "qwen3.7-plus",
+      "media_url_format": "data_url"
+    },
+    "kimi": {
+      "type": "openai_compatible",
+      "api_url": "https://api.moonshot.cn/v1/chat/completions",
+      "api_key_env": "MOONSHOT_API_KEY",
+      "model": "kimi-k2.6",
+      "media_url_format": "data_url",
+      "temperature": 1
+    },
+    "gpt": {
+      "type": "openai_compatible",
+      "api_url": "https://www.yunzhuhub.com/v1/chat/completions",
+      "api_url_env": "OPENAI_API_URL",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-5.5",
+      "media_url_format": "data_url"
+    },
+    "seed": {
+      "type": "openai_compatible",
+      "api_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "api_key_env": "ARK_API_KEY",
+      "model": "doubao-seed-2-1-pro-260628",
+      "media_url_format": "data_url"
+    },
+    "internvl": {
+      "type": "openai_compatible",
+      "api_url": "http://localhost:8000/v1/chat/completions",
+      "api_url_env": "INTERNVL_API_URL",
+      "api_key_env": "INTERNVL_API_KEY",
+      "require_api_key": false,
+      "model": "InternVL3.5-8B",
+      "media_url_format": "data_url"
+    },
+    "local_internvl_8b": {
+      "type": "local_internvl",
+      "model": "/home/llm/hdd/InternVL3_5-30B-A3B",
+      "model_env": "INTERNVL_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 256,
+      "num_segments": 4,
+      "video_sample_fps": 1.0,
+      "max_image_tiles": 4,
+      "max_video_tiles": 1,
+      "use_flash_attn": false,
+      "cuda_visible_devices": "1,2",
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+    },
+    "gemini": {
+      "type": "openai_compatible",
+      "api_url": "https://www.yunzhuhub.com/v1/chat/completions",
+      "api_key_env": "GEMINI_API_KEY",
+      "model": "gemini-3.1-pro-preview",
+      "media_url_format": "data_url"
+    },
+    "local_qwen": {
+      "type": "local_qwen",
+      "model": "/home/llm/hdd/qwen3_vl_30b_a3b_instruct",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+    }
+  },
+  "tasks": {
+    "planning": {
+      "input": "D:/yyyywv/研三/test_vlm/workflow_outputs/planning/planning_2_vqa.json",
+      "output": "D:/yyyywv/研三/test_vlm/workflow_outputs/planning/output_planning_2_qwen37plus.json"
+    },
+    "time": {
+      "input": "/home/llm/yyywv/test_vlm/workflow_outputs/time_understanding/time_vqa.json",
+      "output": "/home/llm/yyywv/test_vlm/results/time_eqa_internvl_30b_results.json",
+      "video_dir": "/home/kewei/YWC/ekpce/video",
+      "video_exts": ".mp4,.webm,.mov,.mkv,.avi"
+    },
+    "understanding": {
+      "input": "/home/llm/yyywv/test_vlm/workflow_outputs/time_understanding/understanding_vqa.json",
+      "output": "/home/llm/yyywv/test_vlm/results/understanding_multi_internvl-30b-local_results.json",
+      "media_key": "clip_path"
+    },
+    "left_right": {
+      "input": "/home/llm/yyywv/test_vlm/workflow_outputs/time_understanding/left_right_vqa.json",
+      "output": "/home/llm/yyywv/test_vlm/results/left_right_qwen-30b_results.json"
+    },
+    "trajectory": {
+      "input": "D:/yyyywv/研三/test_vlm/workflow_outputs/planning/trajectory_qa_2d.json",
+      "output": "D:/yyyywv/研三/test_vlm/workflow_outputs/planning/output_trajectory_2d_KIMI26.json"
+    },
+    "step_order": {
+      "input": "/home/llm/yyywv/test_vlm/workflow_outputs/planning/step_order_vqa_only.json",
+      "output": "/home/llm/yyywv/test_vlm/results/step_order_qwen-32b_results.json"
+    }
+  }
+}
