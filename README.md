@@ -145,20 +145,20 @@ python test/planning_glm_test.py \
 Examples for different tasks:
 
 ```bash
-python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider glm
+python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider glm --model GLM-5V-Turbo
 python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.7-plus
 python test/left_right_glm_test.py --config test/config_test.json --provider internvl --model InternVL3.5-8B
-python test/planning_glm_test.py --config test/config_test.json --provider kimi --model kimi-k2.6
+python test/planning_glm_test.py --config test/config_test.json --provider kimi --model Kimi-K2.6
 python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
-python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model gemini-3.5-flash
-python test/trajectory_glm_test.py --config test/config_test.json --provider seed --model doubao-seed-2-1-pro-260628
+python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model Gemini-3.5-Flash
+python test/trajectory_glm_test.py --config test/config_test.json --provider seed --model Seed2.1
 ```
 
 Use `--overwrite` to recompute existing outputs. For Time EQA, `--limit` limits the number of videos rather than the number of questions.
 
 ## Supported Providers and Exact Model Names
 
-Model names are passed through the `--model` argument. The following table lists the exact names to use with the current evaluation adapter and `test/config_test.json`.
+Model names are passed through the `--model` argument. Use the following exact names when running evaluation scripts.
 
 | Model | Provider | Exact `--model` value |
 | --- | --- | --- |
@@ -168,17 +168,17 @@ Model names are passed through the `--model` argument. The following table lists
 | Qwen3-VL-235B-A22B-Instruct | `qwen` | `Qwen3-VL-235B-A22B-Instruct` |
 | qwen3.5-omni-plus | `qwen` | `qwen3.5-omni-plus` |
 | qwen3.7-plus | `qwen` | `qwen3.7-plus` |
-| Kimi-K2.6 | `kimi` | `kimi-k2.6` |
-| Seed2.1 | `seed` | `doubao-seed-2-1-pro-260628` |
+| Kimi-K2.6 | `kimi` | `Kimi-K2.6` |
+| Seed2.1 | `seed` | `Seed2.1` |
 | Seed2.0-Lite | `seed` | `Seed2.0-Lite` |
 | InternVL3.5-8B | `internvl` | `InternVL3.5-8B` |
 | InternVL3.5-30B-A3B | `internvl` | `InternVL3.5-30B-A3B` |
-| GLM-5V-Turbo | `glm` | `glm-5v-turbo` |
-| Gemini-3.1-Pro | `gemini` | `gemini-3.1-pro-preview` |
-| Gemini-3.5-Flash | `gemini` | `gemini-3.5-flash` |
+| GLM-5V-Turbo | `glm` | `GLM-5V-Turbo` |
+| Gemini-3.1-Pro | `gemini` | `Gemini-3.1-Pro` |
+| Gemini-3.5-Flash | `gemini` | `Gemini-3.5-Flash` |
 | gpt-5.5 | `gpt` | `gpt-5.5` |
 
-`Seed2.1` is configured through the Volcengine Ark endpoint as `doubao-seed-2-1-pro-260628`. If your gateway exposes the shorter alias `Seed2.1`, you can pass that alias instead, but the checked-in config currently defaults to `doubao-seed-2-1-pro-260628`.
+If a gateway or local service uses a different internal alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
 
 ## API Keys
 
