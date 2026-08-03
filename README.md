@@ -151,7 +151,7 @@ python test/left_right_glm_test.py --config test/config_test.json --provider loc
 python test/planning_glm_test.py --config test/config_test.json --provider kimi --model Kimi-K2.6
 python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
 python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model Gemini-3.5-Flash
-python test/trajectory_glm_test.py --config test/config_test.json --provider seed --model Seed2.1
+python test/trajectory_glm_test.py --config test/config_test.json --provider seed --model doubao-seed-2-1-pro-260628
 ```
 
 Use `--overwrite` to recompute existing outputs. For Time EQA, `--limit` limits the number of videos rather than the number of questions.
@@ -169,8 +169,8 @@ Model names are passed through the `--model` argument. Use the following exact n
 | qwen3.5-omni-plus | `qwen` | `qwen3.5-omni-plus` |
 | qwen3.7-plus | `qwen` | `qwen3.7-plus` |
 | Kimi-K2.6 | `kimi` | `Kimi-K2.6` |
-| Seed2.1 | `seed` | `Seed2.1` |
-| Seed2.0-Lite | `seed` | `Seed2.0-Lite` |
+| Seed2.1 | `seed` | Ark model id, current config uses `doubao-seed-2-1-pro-260628` |
+| Seed2.0-Lite | `seed` | `doubao-seed-2-0-lite-260428` |
 | InternVL3.5-8B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-8B` |
 | InternVL3.5-30B-A3B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-30B-A3B` |
 | GLM-5V-Turbo | `glm` | `GLM-5V-Turbo` |
@@ -178,7 +178,7 @@ Model names are passed through the `--model` argument. Use the following exact n
 | Gemini-3.5-Flash | `gemini` | `Gemini-3.5-Flash` |
 | gpt-5.5 | `gpt` | `gpt-5.5` |
 
-If a gateway or local service uses a different internal alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
+For Seed models, use the exact Ark model id exposed by your Volcengine/Doubao endpoint. The checked-in config currently uses `doubao-seed-2-1-pro-260628` for Seed2.1, and public Ark-related references list Seed2.0-Lite as `doubao-seed-2-0-lite-260428`. If your endpoint exposes a different alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
 
 ## API Keys
 
