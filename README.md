@@ -135,8 +135,8 @@ All evaluation scripts support the same core runtime arguments:
 ```bash
 python test/planning_glm_test.py \
   --config test/config_test.json \
-  --provider qwen \
-  --model Qwen3-VL-32B-Instruct \
+  --provider local_qwen \
+  --model /path/to/Qwen3-VL-32B-Instruct \
   --input /path/to/planning_vqa.json \
   --output /path/to/results.json \
   --limit 10
@@ -147,7 +147,7 @@ Examples for different tasks:
 ```bash
 python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider glm --model GLM-5V-Turbo
 python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.7-plus
-python test/left_right_glm_test.py --config test/config_test.json --provider internvl --model InternVL3.5-8B
+python test/left_right_glm_test.py --config test/config_test.json --provider local_internvl_8b --model /path/to/InternVL3.5-8B
 python test/planning_glm_test.py --config test/config_test.json --provider kimi --model Kimi-K2.6
 python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
 python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model Gemini-3.5-Flash
@@ -162,17 +162,17 @@ Model names are passed through the `--model` argument. Use the following exact n
 
 | Model | Provider | Exact `--model` value |
 | --- | --- | --- |
-| Qwen3-VL-8B-Instruct | `qwen` | `Qwen3-VL-8B-Instruct` |
-| Qwen3-VL-32B-Instruct | `qwen` | `Qwen3-VL-32B-Instruct` |
-| Qwen3-VL-30B-A3B-Instruct | `qwen` | `Qwen3-VL-30B-A3B-Instruct` |
+| Qwen3-VL-8B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-8B-Instruct` |
+| Qwen3-VL-32B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-32B-Instruct` |
+| Qwen3-VL-30B-A3B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-30B-A3B-Instruct` |
 | Qwen3-VL-235B-A22B-Instruct | `qwen` | `Qwen3-VL-235B-A22B-Instruct` |
 | qwen3.5-omni-plus | `qwen` | `qwen3.5-omni-plus` |
 | qwen3.7-plus | `qwen` | `qwen3.7-plus` |
 | Kimi-K2.6 | `kimi` | `Kimi-K2.6` |
 | Seed2.1 | `seed` | `Seed2.1` |
 | Seed2.0-Lite | `seed` | `Seed2.0-Lite` |
-| InternVL3.5-8B | `internvl` | `InternVL3.5-8B` |
-| InternVL3.5-30B-A3B | `internvl` | `InternVL3.5-30B-A3B` |
+| InternVL3.5-8B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-8B` |
+| InternVL3.5-30B-A3B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-30B-A3B` |
 | GLM-5V-Turbo | `glm` | `GLM-5V-Turbo` |
 | Gemini-3.1-Pro | `gemini` | `Gemini-3.1-Pro` |
 | Gemini-3.5-Flash | `gemini` | `Gemini-3.5-Flash` |
