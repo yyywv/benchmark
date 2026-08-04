@@ -1,27 +1,17 @@
-<div align="center">
-
 # Robot VLM Workflow Benchmark
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#installation)
-[![Tasks](https://img.shields.io/badge/VQA%20Tasks-8-2ea44f)](#tasks)
-[![Models](https://img.shields.io/badge/Models-15-8a63d2)](#supported-providers-and-exact-model-names)
-
-</div>
 
 This project builds and evaluates visual-language-model (VLM) question-answering benchmarks for robot pick/place workflows. It focuses on egocentric and multi-view robot videos, converting annotated action segments into VQA-style JSON files and then evaluating different VLMs on temporal grounding, state understanding, planning, viewpoint matching, step ordering, and trajectory prediction.
 
-> [!TIP]
-> Start with `data/*_config.json`, generate VQA files with `data/*_workflow.py`,
-> then evaluate them with the scripts in `test/`.
+## Abstract
 
----
+This repository provides a reproducible workflow benchmark for evaluating VLMs on robot manipulation videos. The benchmark converts segmented egocentric and multi-view robot demonstrations into VQA-style tasks, then evaluates model performance across temporal localization, state understanding, planning, viewpoint matching, step ordering, and trajectory prediction.
 
-## Quick Links
+## Contents
 
 - [Overview](#overview)
 - [Tasks](#tasks)
 - [Generate VQA Data](#generate-vqa-data)
-- [Task-Specific Notes](#task-specific-notes)
+- [Generation Protocol Notes](#generation-protocol-notes)
 - [Configuration Notes](#configuration-notes)
 - [Evaluate Models](#evaluate-models)
 - [Supported Providers and Exact Model Names](#supported-providers-and-exact-model-names)
@@ -35,7 +25,7 @@ The workflow contains two dataset-generation pipelines:
 
 The generated JSON files are evaluated by scripts in `test/`, with model calls unified through `test/vlm_api.py`.
 
-| Pipeline | Main tasks | Main config |
+| **Pipeline** | **Main tasks** | **Main config** |
 | --- | --- | --- |
 | Time and understanding | `time`, `understanding`, `left_right`, `image_in_video` | `data/time_unders_workflow_config.json` |
 | Planning and trajectories | `planning`, `planning_2`, `step_order`, `trajectory` | `data/planning_workflow_config.json` |
@@ -113,11 +103,7 @@ Some media-generation paths also require `ffmpeg` to be available in `PATH`.
 
 ## Generate VQA Data
 
-> [!NOTE]
-> VQA generation is config-driven. Check `data_dir`, video roots, output paths,
-> task names, and category label files before running a full generation job.
-
-| **Before running** | **What to verify** |
+| **Pre-generation Check** | **Required Setting** |
 | --- | --- |
 | **Input annotations** | `data_dir` points to the directory containing `*_segments.json`. |
 | **Video roots** | `video_dir`, `multi_view_video_root`, and `views` match the local video layout. |
@@ -168,79 +154,28 @@ python data/time_unders_workflow.py \
 On Windows, frame extraction writes images with a Unicode-path-safe OpenCV path,
 so workspaces whose paths contain non-ASCII characters are supported.
 
-## Task-Specific Notes
+## Generation Protocol Notes
 
-> [!WARNING]
-> Read this section before generating benchmark data. These settings affect the
-> fairness and semantic quality of the generated VQA files.
+The following protocol details are important for obtaining fair and reproducible VQA data.
 
-| **Planning and understanding distractors** |
-| --- |
-| **Applies to:** `planning`, `planning_2`, `understanding` |
-| **Behavior:** when generating these VQA tasks, the workflow can call an external large model to generate wrong answer options. |
-| **Controls:** enable or disable this with `use_llm_distractors`; configure the endpoint with `llm_distractor_api_url`, `llm_distractor_api_key_env`, and `llm_distractor_model`. |
-| **Category context:** these tasks read the category label text file set by `category_label_path`. The generator uses both the file name and file contents as category context. |
+| **Protocol Item** | **Applies To** | **Required Practice** |
+| --- | --- | --- |
+| **LLM-generated distractors** | `planning`, `planning_2`, `understanding` | These VQA generators can call an external large model to produce wrong answer options. Control this with `use_llm_distractors`, `llm_distractor_api_url`, `llm_distractor_api_key_env`, and `llm_distractor_model`. |
+| **Category txt semantics** | `planning`, `planning_2`, `understanding` | The generator reads both the `category_label_path` file name and its contents as category context. The file name should summarize the whole task category as a concise phrase. |
+| **Timestamp cropping** | `left_right`, `step_order`, `image_in_video` | If source videos contain visible timestamp overlays, set `crop_time_video_top` to `true` before generating VQA data, or pass `--crop-time-video-top` from the command line. |
 
-| **Category txt file naming** |
-| --- |
-| **Rule:** name the txt file with a concise, descriptive, task-level phrase that summarizes the whole task category. |
-| **Good examples:** `stack_all_cubes.txt`, `pick_and_place_blocks.txt`, `sort_colored_objects.txt` |
-| **Avoid:** vague names such as `labels.txt`, `category.txt`, or `actions.txt`. |
-| **Contents:** list the valid action or category labels for the same task family, one label per line. |
+| **Category txt Naming Guideline** | **Example** |
+| --- | --- |
+| **Use a task-level phrase** | `stack_all_cubes.txt`, `pick_and_place_blocks.txt`, `sort_colored_objects.txt` |
+| **Keep the file name semantically aligned with the labels inside** | A stack-all-cubes file should contain labels from the stack-all-cubes task family. |
+| **Avoid generic file names** | Do not use names such as `labels.txt`, `category.txt`, or `actions.txt`. |
 
-| **Timestamp crop checklist** |
-| --- |
-| **Parameter:** set `crop_time_video_top` to `true`, or pass `--crop-time-video-top` on the command line. |
-| **Reason:** top-frame timestamps can leak the answer through chronological text rather than visual understanding. |
-| **Related option:** adjust `time_crop_top_fraction` if the timestamp overlay occupies a larger or smaller top region. |
-
-> [!IMPORTANT]
-> **Left/right gripper-view matching (`left_right`)**
->
-> If the source videos contain visible timestamp overlays at the top, set
-> `crop_time_video_top` to `true` before generating VQA data. This prevents the
-> model from using timestamp text as an unintended shortcut when matching head
-> and wrist camera views.
->
-> Configure it in `data/time_unders_workflow_config.json`, or pass
-> `--crop-time-video-top` when running `data/time_unders_workflow.py`.
-
-> [!IMPORTANT]
-> **Step ordering (`step_order`)**
->
-> If the generated step-order images come from videos with visible timestamp
-> overlays, set `crop_time_video_top` to `true` before generating VQA data. The
-> timestamp should be cropped so the answer depends on visual state changes, not
-> on chronological text shown in the frame.
->
-> Configure it in `data/planning_workflow_config.json`, or pass
-> `--crop-time-video-top` when running `data/planning_workflow.py`.
-
-> [!IMPORTANT]
-> **Image-in-video matching (`image_in_video`)**
->
-> If the input clip or candidate option images contain visible timestamp
-> overlays, set `crop_time_video_top` to `true` before generating VQA data. This
-> keeps the task focused on whether the image appears in the clip instead of
-> exposing timestamp clues.
->
-> Configure it in `data/time_unders_workflow_config.json`, or pass
-> `--crop-time-video-top` when running `data/time_unders_workflow.py`.
-
-## Image-in-Video QA
-
-Each `image_in_video` question asks which candidate image appeared in the input
-left-eye action-segment clip. The option set always has six choices:
-
-- one correct option sampled from the same timestamp segment video clip
-- two distractors from the same source video but different action categories
-- one distractor from another source video with the same action category
-- one distractor from another source video with a different action category
-- one `All other options are wrong.` option
-
-The output item stores the input clip under `input.clip_path`, image options
-under `options[].image_path`, the answer letter under `answer`/`A`, and the
-option provenance under `options[].distractor_type`.
+| **Timestamp Crop Guideline** | **Configuration** |
+| --- | --- |
+| **Left/right gripper-view matching** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`. |
+| **Step ordering** | Set `crop_time_video_top=true` in `data/planning_workflow_config.json`. |
+| **Image-in-video matching** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`. |
+| **Crop height** | Adjust `time_crop_top_fraction` if the timestamp overlay occupies a larger or smaller top region. |
 
 ## Configuration Notes
 
