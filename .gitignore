@@ -1,0 +1,19 @@
+# Local agent/cache files
+.agents/
+.cache/
+.codex
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Large local data and generated outputs
+datasets/
+workflow_outputs/
+results/
+
+# Common local/runtime artifacts
+.env
+.venv/
+venv/
+*.log

@@ -160,7 +160,7 @@ Important fields in the generation configs:
 - `image_in_video_question`: question text for image-in-video matching.
 - `image_in_video_view`: source view for image-in-video clips and option images; currently use `left_eye`.
 
-The current planning config uses `glm-5.2` for LLM distractors through `ZAI_API_KEY`. The current time/understanding config uses `gpt-5.5` for LLM distractors through `OPENAI_API_KEY`.
+The current configs can use external LLMs for distractor generation through the API keys configured in `data/*_config.json`.
 
 ## Evaluate Models
 
@@ -170,7 +170,7 @@ All evaluation scripts support the same core runtime arguments:
 python test/planning_glm_test.py \
   --config test/config_test.json \
   --provider local_qwen \
-  --model /path/to/Qwen3-VL-32B-Instruct \
+  --model /path/to/Qwen3-VL-30B-A3B-Instruct \
   --input /path/to/planning_vqa.json \
   --output /path/to/results.json \
   --limit 10
@@ -180,14 +180,14 @@ Examples for different tasks:
 
 ```bash
 python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider glm --model glm-5v-turbo
-python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.7-plus
+python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.8-max
 python test/left_right_glm_test.py --config test/config_test.json --provider local_internvl_8b --model /path/to/InternVL3.5-8B
-python test/image_in_video_glm_test.py --config test/config_test.json --provider local_qwen --model /path/to/Qwen3-VL-32B-Instruct
+python test/image_in_video_glm_test.py --config test/config_test.json --provider local_qwen --model /path/to/Qwen3-VL-8B-Instruct
 python test/image_in_video_glm_test.py --config test/config_test.json --provider local_cosmos3_edge_2b
-python test/planning_glm_test.py --config test/config_test.json --provider kimi --model kimi-k2.6
-python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
+python test/planning_glm_test.py --config test/config_test.json --provider seed --model doubao-seed-2-0-lite-260428
+python test/planning_2_glm_test.py --config test/config_test.json --provider local_rynnbrain_2b --model /path/to/RynnBrain-2B
 python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model gemini-3.5-flash
-python test/trajectory_glm_test.py --config test/config_test.json --provider seed --model doubao-seed-2-1-pro-260628
+python test/trajectory_glm_test.py --config test/config_test.json --provider local_cosmos_reason_2b --model /path/to/Cosmos-Reason2-2B
 ```
 
 Use `--overwrite` to recompute existing outputs. For Time EQA, `--limit` limits the number of videos rather than the number of questions.
@@ -199,27 +199,22 @@ Model names are passed through the `--model` argument. Use the following exact n
 | Model | Provider | Exact `--model` value |
 | --- | --- | --- |
 | Qwen3-VL-8B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-8B-Instruct` |
-| Qwen3-VL-32B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-32B-Instruct` |
 | Qwen3-VL-30B-A3B-Instruct | `local_qwen` | local weights path, for example `/path/to/Qwen3-VL-30B-A3B-Instruct` |
 | Qwen3-VL-235B-A22B-Instruct | `qwen` | `qwen3-vl-235b-a22b-instruct` |
-| qwen3.5-omni-plus | `qwen` | `qwen3.5-omni-plus` |
-| qwen3.7-plus | `qwen` | `qwen3.7-plus` |
-| Kimi-K2.6 | `kimi` | `kimi-k2.6` |
-| Seed2.1 | `seed` | Ark model id, current config uses `doubao-seed-2-1-pro-260628` |
+| qwen3.8-max | `qwen` | `qwen3.8-max` |
 | Seed2.0-Lite | `seed` | `doubao-seed-2-0-lite-260428` |
 | InternVL3.5-8B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-8B` |
 | InternVL3.5-30B-A3B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-30B-A3B` |
+| GLM-5V-Turbo | `glm` | `glm-5v-turbo` |
+| Gemini-3.1-Pro | `gemini` | `gemini-3.1-pro-preview` |
+| Gemini-3.5-Flash | `gemini` | `gemini-3.5-flash` |
 | RynnBrain-2B | `local_rynnbrain_2b` | local weights path, for example `/path/to/RynnBrain-2B` |
 | RynnBrain1.1-2B | `local_rynnbrain11_2b` | local weights path, for example `/path/to/RynnBrain1.1-2B` |
 | Cosmos 3-edge 2B | `local_cosmos3_edge_2b` | local weights path, for example `/ssd/Cosmos3-Edge` |
 | Cosmos-reason 2B | `local_cosmos_reason_2b` | local weights path, for example `/path/to/Cosmos-Reason2-2B` |
 | SenseNova-SI-1.1 InternVL32B | `local_sensenova_si_1_1_internvl32b` | local weights path, for example `/path/to/SenseNova-SI-1.1-InternVL32B` |
-| GLM-5V-Turbo | `glm` | `glm-5v-turbo` |
-| Gemini-3.1-Pro | `gemini` | `gemini-3.1-pro-preview` |
-| Gemini-3.5-Flash | `gemini` | `gemini-3.5-flash` |
-| gpt-5.5 | `gpt` | `gpt-5.5` |
 
-For Seed models, use the exact Ark model id exposed by your Volcengine/Doubao endpoint. The checked-in config currently uses `doubao-seed-2-1-pro-260628` for Seed2.1, and public Ark-related references list Seed2.0-Lite as `doubao-seed-2-0-lite-260428`. If your endpoint exposes a different alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
+For Seed models, use the exact Ark model id exposed by your Volcengine/Doubao endpoint. The current Seed2.0-Lite entry uses `doubao-seed-2-0-lite-260428`. If your endpoint exposes a different alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
 
 For remote API providers, use the lowercase model id expected by the endpoint. Local Qwen and local InternVL entries use filesystem paths to the downloaded weights instead of API model ids.
 
@@ -252,10 +247,8 @@ Set the environment variable for the provider you use:
 | --- | --- | --- |
 | `glm` | `ZHIPUAI_API_KEY` | `https://open.bigmodel.cn/api/paas/v4/chat/completions` |
 | `qwen` | `DASHSCOPE_API_KEY` | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
-| `kimi` | `MOONSHOT_API_KEY` | `https://api.moonshot.cn/v1/chat/completions` |
 | `seed` | `ARK_API_KEY` | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
 | `gemini` | `GEMINI_API_KEY` | configured OpenAI-compatible endpoint |
-| `gpt` | `OPENAI_API_KEY` | configured OpenAI-compatible endpoint |
 | `internvl` | `INTERNVL_API_KEY` optional | `INTERNVL_API_URL` or `http://localhost:8000/v1/chat/completions` |
 
 For local InternVL inference, use provider `local_internvl_8b` and set `INTERNVL_MODEL_PATH` or pass `--model /path/to/weights`. For local Qwen inference, use provider `local_qwen` and set the model path in `test/config_test.json` or pass `--model /path/to/weights`.
