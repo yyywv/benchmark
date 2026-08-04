@@ -1,14 +1,20 @@
+<div align="center">
+
 # Robot VLM Workflow Benchmark
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#installation)
 [![Tasks](https://img.shields.io/badge/VQA%20Tasks-8-2ea44f)](#tasks)
 [![Models](https://img.shields.io/badge/Models-15-8a63d2)](#supported-providers-and-exact-model-names)
 
+</div>
+
 This project builds and evaluates visual-language-model (VLM) question-answering benchmarks for robot pick/place workflows. It focuses on egocentric and multi-view robot videos, converting annotated action segments into VQA-style JSON files and then evaluating different VLMs on temporal grounding, state understanding, planning, viewpoint matching, step ordering, and trajectory prediction.
 
 > [!TIP]
 > Start with `data/*_config.json`, generate VQA files with `data/*_workflow.py`,
 > then evaluate them with the scripts in `test/`.
+
+---
 
 ## Quick Links
 
@@ -111,6 +117,14 @@ Some media-generation paths also require `ffmpeg` to be available in `PATH`.
 > VQA generation is config-driven. Check `data_dir`, video roots, output paths,
 > task names, and category label files before running a full generation job.
 
+| **Before running** | **What to verify** |
+| --- | --- |
+| **Input annotations** | `data_dir` points to the directory containing `*_segments.json`. |
+| **Video roots** | `video_dir`, `multi_view_video_root`, and `views` match the local video layout. |
+| **Output location** | `output_dir` is separate from evaluation result files. |
+| **Category labels** | `category_label_path` points to a clearly named task-level txt file. |
+| **Timestamp overlays** | For `left_right`, `step_order`, and `image_in_video`, set `crop_time_video_top=true` if timestamps appear in the video frame. |
+
 Generate Time, Understanding, Left/Right, and Image-in-Video tasks:
 
 ```bash
@@ -157,28 +171,28 @@ so workspaces whose paths contain non-ASCII characters are supported.
 ## Task-Specific Notes
 
 > [!WARNING]
-> **Planning and understanding distractors**
->
-> When generating VQA data for `planning`, `planning_2`, and `understanding`,
-> the workflow can call an external large model to generate wrong answer
-> options. Enable or disable this with `use_llm_distractors`, and configure the
-> endpoint through `llm_distractor_api_url`, `llm_distractor_api_key_env`, and
-> `llm_distractor_model`.
->
-> These tasks also read the category label text file set by
-> `category_label_path`. The file name and file contents are both used as
-> category context, so name the txt file with a broad phrase that clearly
-> describes the whole task category, for example `stack_all_cubes.txt` for a
-> stack-all-cubes task. Avoid vague names such as `labels.txt` or
-> `category.txt`.
+> Read this section before generating benchmark data. These settings affect the
+> fairness and semantic quality of the generated VQA files.
 
-> [!IMPORTANT]
-> **Category txt file naming**
->
-> Use a concise, descriptive, task-level phrase for the category txt file name:
-> `stack_all_cubes.txt`, `pick_and_place_blocks.txt`, or
-> `sort_colored_objects.txt`. The contents should list the valid action or
-> category labels for that same task family, one label per line.
+| **Planning and understanding distractors** |
+| --- |
+| **Applies to:** `planning`, `planning_2`, `understanding` |
+| **Behavior:** when generating these VQA tasks, the workflow can call an external large model to generate wrong answer options. |
+| **Controls:** enable or disable this with `use_llm_distractors`; configure the endpoint with `llm_distractor_api_url`, `llm_distractor_api_key_env`, and `llm_distractor_model`. |
+| **Category context:** these tasks read the category label text file set by `category_label_path`. The generator uses both the file name and file contents as category context. |
+
+| **Category txt file naming** |
+| --- |
+| **Rule:** name the txt file with a concise, descriptive, task-level phrase that summarizes the whole task category. |
+| **Good examples:** `stack_all_cubes.txt`, `pick_and_place_blocks.txt`, `sort_colored_objects.txt` |
+| **Avoid:** vague names such as `labels.txt`, `category.txt`, or `actions.txt`. |
+| **Contents:** list the valid action or category labels for the same task family, one label per line. |
+
+| **Timestamp crop checklist** |
+| --- |
+| **Parameter:** set `crop_time_video_top` to `true`, or pass `--crop-time-video-top` on the command line. |
+| **Reason:** top-frame timestamps can leak the answer through chronological text rather than visual understanding. |
+| **Related option:** adjust `time_crop_top_fraction` if the timestamp overlay occupies a larger or smaller top region. |
 
 > [!IMPORTANT]
 > **Left/right gripper-view matching (`left_right`)**
