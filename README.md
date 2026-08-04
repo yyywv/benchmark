@@ -6,7 +6,7 @@ This project builds and evaluates visual-language-model (VLM) question-answering
 
 The workflow contains two dataset-generation pipelines:
 
-- `data/time_unders_workflow.py`: generates Time EQA, current-action Understanding, and Left/Right gripper-view matching tasks.
+- `data/time_unders_workflow.py`: generates Time EQA, current-action Understanding, Left/Right gripper-view matching, and image-in-video matching tasks.
 - `data/planning_workflow.py`: generates next-action Planning, goal-conditioned Planning, Step Order, and 2D/3D Trajectory prediction tasks.
 
 The generated JSON files are evaluated by scripts in `test/`, with model calls unified through `test/vlm_api.py`.
@@ -26,6 +26,7 @@ workflow/
 |   |-- time_eqa_glm_test_multi.py
 |   |-- understanding_glm_test.py
 |   |-- left_right_glm_test.py
+|   |-- image_in_video_glm_test.py
 |   |-- planning_glm_test.py
 |   |-- planning_2_glm_test.py
 |   |-- step_order_glm_test.py
@@ -33,7 +34,7 @@ workflow/
 `-- stack_all_cubes.txt
 ```
 
-Note: `data/` may contain extra local or legacy files. The core workflow files are the four files listed above.
+Note: `data/` and `test/` may contain extra local or legacy files. The core workflow files are the files listed above.
 
 ## Tasks
 
@@ -42,6 +43,7 @@ Note: `data/` may contain extra local or legacy files. The core workflow files a
 | Time EQA | `time_unders_workflow.py` | `time_eqa_glm_test_multi.py` | `time_vqa.json` |
 | Current-action understanding | `time_unders_workflow.py` | `understanding_glm_test.py` | `understanding_vqa.json` |
 | Left/right gripper-view matching | `time_unders_workflow.py` | `left_right_glm_test.py` | `left_right_vqa.json` |
+| Image-in-video matching | `time_unders_workflow.py` | `image_in_video_glm_test.py` | `image_in_video_vqa.json` |
 | Next-action planning | `planning_workflow.py` | `planning_glm_test.py` | `planning_vqa.json` |
 | Goal-conditioned planning | `planning_workflow.py` | `planning_2_glm_test.py` | `planning_2_vqa.json` |
 | Step ordering | `planning_workflow.py` | `step_order_glm_test.py` | `step_order_vqa.json`, `step_order_vqa_only.json` |
@@ -82,7 +84,7 @@ Some media-generation paths also require `ffmpeg` to be available in `PATH`.
 
 ## Generate VQA Data
 
-Generate Time, Understanding, and Left/Right tasks:
+Generate Time, Understanding, Left/Right, and Image-in-Video tasks:
 
 ```bash
 python data/time_unders_workflow.py \
@@ -110,6 +112,36 @@ python data/time_unders_workflow.py \
 
 `--no-media` generates JSON only and skips frame or video extraction.
 
+The `image_in_video` task requires media extraction because each sample contains
+one left-eye video clip plus candidate option images. If you only want to build
+this task, make sure `multi_view_video_root` points to the per-view video root
+and `views` includes `left_eye`:
+
+```bash
+python data/time_unders_workflow.py \
+  --config data/time_unders_workflow_config.json \
+  --tasks image_in_video \
+  --image-in-video-view left_eye
+```
+
+On Windows, frame extraction writes images with a Unicode-path-safe OpenCV path,
+so workspaces whose paths contain non-ASCII characters are supported.
+
+## Image-in-Video QA
+
+Each `image_in_video` question asks which candidate image appeared in the input
+left-eye action-segment clip. The option set always has six choices:
+
+- one correct option sampled from the same timestamp segment video clip
+- two distractors from the same source video but different action categories
+- one distractor from another source video with the same action category
+- one distractor from another source video with a different action category
+- one `All other options are wrong.` option
+
+The output item stores the input clip under `input.clip_path`, image options
+under `options[].image_path`, the answer letter under `answer`/`A`, and the
+option provenance under `options[].distractor_type`.
+
 ## Configuration Notes
 
 Important fields in the generation configs:
@@ -125,6 +157,8 @@ Important fields in the generation configs:
 - `use_llm_distractors`: whether to use an LLM to generate distractor options.
 - `llm_distractor_api_url`, `llm_distractor_api_key_env`, `llm_distractor_model`: API settings for distractor generation.
 - `window_mode`: temporal window mode, one of `raw`, `transition`, or `legacy_pickplace`.
+- `image_in_video_question`: question text for image-in-video matching.
+- `image_in_video_view`: source view for image-in-video clips and option images; currently use `left_eye`.
 
 The current planning config uses `glm-5.2` for LLM distractors through `ZAI_API_KEY`. The current time/understanding config uses `gpt-5.5` for LLM distractors through `OPENAI_API_KEY`.
 
@@ -148,6 +182,7 @@ Examples for different tasks:
 python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider glm --model glm-5v-turbo
 python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.7-plus
 python test/left_right_glm_test.py --config test/config_test.json --provider local_internvl_8b --model /path/to/InternVL3.5-8B
+python test/image_in_video_glm_test.py --config test/config_test.json --provider local_qwen --model /path/to/Qwen3-VL-32B-Instruct
 python test/planning_glm_test.py --config test/config_test.json --provider kimi --model kimi-k2.6
 python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
 python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model gemini-3.5-flash

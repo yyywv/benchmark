@@ -33,7 +33,7 @@
   "defaults": {
     "temperature": 0.0,
     "thinking": "disabled",
-    "timeout": 180,
+    "timeout": 300,
     "max_retries": 3
   },
   "providers": {
@@ -59,7 +59,8 @@
       "api_key_env": "MOONSHOT_API_KEY",
       "model": "kimi-k2.6",
       "media_url_format": "data_url",
-      "temperature": 1
+      "temperature": 1,
+      "stream":true
     },
     "gpt": {
       "type": "openai_compatible",
@@ -74,7 +75,8 @@
       "api_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       "api_key_env": "ARK_API_KEY",
       "model": "doubao-seed-2-1-pro-260628",
-      "media_url_format": "data_url"
+      "media_url_format": "data_url",
+      "stream":true
     },
     "internvl": {
       "type": "openai_compatible",
@@ -133,6 +135,10 @@
     "left_right": {
       "input": "/home/llm/yyywv/test_vlm/workflow_outputs/time_understanding/left_right_vqa.json",
       "output": "/home/llm/yyywv/test_vlm/results/left_right_qwen-30b_results.json"
+    },
+    "image_in_video": {
+      "input": "D:/yyyywv/研三/test_vlm/workflow_outputs/time_understanding/image_in_video_vqa.json",
+      "output": "D:/yyyywv/研三/test_vlm/workflow_outputs/time_understanding/output_image_in_video_gemini31pro.json"
     },
     "trajectory": {
       "input": "D:/yyyywv/研三/test_vlm/workflow_outputs/planning/trajectory_qa_2d.json",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # coding: utf-8
-"""Generic workflow for building Time, Understanding, and Left/Right VQA JSON.
+"""Generic workflow for building Time, Understanding, Left/Right, and image-in-video VQA JSON.
 
 The input format is a directory of `*_segments.json` files. Each file should
 contain a `segments` list, and each segment should include at least:
@@ -27,6 +27,32 @@ from typing import Any
 import cv2
 import requests
 
+if not hasattr(argparse, "BooleanOptionalAction"):
+    class _BooleanOptionalAction(argparse.Action):
+        def __init__(
+            self,
+            option_strings: list[str],
+            dest: str,
+            default: Any = None,
+            **kwargs: Any,
+        ) -> None:
+            option_strings = list(option_strings)
+            for option_string in option_strings[:]:
+                if option_string.startswith("--"):
+                    option_strings.append("--no-" + option_string[2:])
+            super().__init__(option_strings=option_strings, dest=dest, nargs=0, default=default, **kwargs)
+
+        def __call__(
+            self,
+            parser: argparse.ArgumentParser,
+            namespace: argparse.Namespace,
+            values: str | None,
+            option_string: str | None = None,
+        ) -> None:
+            setattr(namespace, self.dest, not str(option_string).startswith("--no-"))
+
+    argparse.BooleanOptionalAction = _BooleanOptionalAction  # type: ignore[attr-defined]
+
 DEFAULT_DATA_DIR = Path("/home/kewei/YWC/egodata/pickplace/json")
 DEFAULT_VIDEO_DIR = Path("/home/kewei/YWC/egodata/pickplace/video")
 DEFAULT_MULTI_VIEW_VIDEO_ROOT = Path("/home/kewei/NAS/lerobot_datasets-26-06-17-17-25-20/gripper/videos")
@@ -35,7 +61,7 @@ DEFAULT_OUTPUT_DIR = Path("/home/kewei/YWC/egodata/pickplace/workflow_outputs")
 DEFAULT_TIME_CROPPED_VIDEO_DIR = Path("/home/kewei/YWC/egodata/pickplace/workflow_outputs/time_video_crop_top")
 DEFAULT_CATEGORY_LABEL_PATH = Path("/home/kewei/YWC/egodata/pickplace/workflow/cube.txt")
 DEFAULT_VIDEO_EXTS = ".mp4,.webm,.mov,.mkv,.avi"
-DEFAULT_TASKS = "time,understanding,left_right"
+DEFAULT_TASKS = "time,understanding,left_right,image_in_video"
 DEFAULT_NUM_OPTIONS = 6
 
 DEFAULT_TIME_QUESTION = 'When did the action "{action}" happen?'
@@ -45,6 +71,9 @@ DEFAULT_UNDERSTANDING_QUESTION = (
 DEFAULT_LEFT_RIGHT_QUESTION = (
     "Given the image captured by the head camera, which option shows the {side} "
     "gripper camera's view at this moment?"
+)
+DEFAULT_IMAGE_IN_VIDEO_QUESTION = (
+    "Given this left-eye video clip of an action segment, which option image appeared in the clip?"
 )
 NONE_OPTION_TEXT = "All other options are wrong."
 CONFIG_PATH_KEYS = {
@@ -87,6 +116,8 @@ CONFIG_KEYS = {
     "time_question",
     "understanding_question",
     "left_right_question",
+    "image_in_video_question",
+    "image_in_video_view",
     "left_right_target_side",
     "left_right_timestamp_key",
     "left_right_head_view",
@@ -131,6 +162,8 @@ def default_config() -> dict[str, Any]:
         "time_question": DEFAULT_TIME_QUESTION,
         "understanding_question": DEFAULT_UNDERSTANDING_QUESTION,
         "left_right_question": DEFAULT_LEFT_RIGHT_QUESTION,
+        "image_in_video_question": DEFAULT_IMAGE_IN_VIDEO_QUESTION,
+        "image_in_video_view": "left_eye",
         "left_right_target_side": "both",
         "left_right_timestamp_key": "mid",
         "left_right_head_view": "left_eye",
@@ -252,7 +285,9 @@ def sorted_segment_files(data_dir: Path, limit: int | None) -> list[Path]:
 
 
 def video_id_from_path(path: Path) -> str:
-    return path.name.removesuffix("_segments.json")
+    suffix = "_segments.json"
+    name = path.name
+    return name[: -len(suffix)] if name.endswith(suffix) else path.stem
 
 
 def action_text_for_segment(segment: dict[str, Any]) -> str:
@@ -1056,8 +1091,10 @@ def extract_frame(video_path: Path, timestamp: float, output_path: Path) -> tupl
         raise RuntimeError(f"Failed to read frame {frame_index} from {video_path}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(output_path), frame):
+    ok, encoded = cv2.imencode(output_path.suffix or ".jpg", frame)
+    if not ok:
         raise RuntimeError(f"Failed to write frame: {output_path}")
+    encoded.tofile(str(output_path))
     return frame_index, frame_index / fps
 
 
@@ -1114,6 +1151,14 @@ def left_right_target_sides_for_item(item: dict[str, Any], target_side: str) -> 
 
 def deterministic_rows(seed: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: hashlib.md5(f"{seed}|{row.get('id')}".encode("utf-8")).hexdigest())
+
+
+def deterministic_timestamp(seed: str, start: float, end: float) -> float:
+    if end <= start:
+        return start
+    digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
+    ratio = int(digest[:12], 16) / float(0xFFFFFFFFFFFF)
+    return start + ratio * (end - start)
 
 
 def left_right_temporal_items(
@@ -1404,6 +1449,296 @@ def build_left_right_items(
                     "source_time_eqa": item,
                 }
             )
+    return output_items
+
+
+def image_in_video_category(item: dict[str, Any]) -> str:
+    return clean_text(str(item["metadata"].get("narration") or item.get("answer_action") or "the action"))
+
+
+def image_in_video_candidate_items(
+    item: dict[str, Any],
+    all_items: list[dict[str, Any]],
+    same_video: bool,
+    same_category: bool,
+    count: int,
+    seed_suffix: str,
+) -> list[dict[str, Any]]:
+    video_id = str(item["video_id"])
+    item_id = str(item["id"])
+    category = normalize_option_text(image_in_video_category(item))
+    candidates = []
+    for row in all_items:
+        if str(row.get("id")) == item_id:
+            continue
+        row_same_video = str(row.get("video_id")) == video_id
+        row_same_category = normalize_option_text(image_in_video_category(row)) == category
+        if row_same_video == same_video and row_same_category == same_category:
+            candidates.append(row)
+    return deterministic_rows(f"{item_id}|image_in_video|{seed_suffix}", candidates)[:count]
+
+
+def image_in_video_option_image(
+    item: dict[str, Any],
+    view_name: str,
+    view_dir: str,
+    role: str,
+    images_dir: Path,
+    multi_view_video_root: Path,
+    video_exts: tuple[str, ...],
+    video_cache: dict[tuple[str, str], Path],
+) -> dict[str, Any]:
+    video_id = str(item["video_id"])
+    item_id = str(item["id"])
+    start = float(item["answer_seconds"]["start"])
+    end = float(item["answer_seconds"]["end"])
+    timestamp = deterministic_timestamp(f"{item_id}|{role}|frame", start, end)
+    cache_key = (view_name, video_id)
+    video_path = video_cache.get(cache_key)
+    if video_path is None:
+        video_path = multiview_video_path_for(
+            video_id=video_id,
+            multi_view_video_root=multi_view_video_root,
+            view_dir=view_dir,
+            video_exts=video_exts,
+        )
+        video_cache[cache_key] = video_path
+
+    image_name = (
+        f"{safe_filename(video_id)}_{safe_filename(item_id)}_"
+        f"{timestamp:.3f}s_{safe_filename(view_name)}_{safe_filename(role)}.jpg"
+    )
+    image_path = images_dir / "option_images" / view_name / video_id / image_name
+    frame_index, actual_timestamp = extract_frame(video_path, timestamp, image_path)
+    return {
+        "type": "image",
+        "text": None,
+        "image_path": str(image_path),
+        "view": view_name,
+        "role": role,
+        "source_item_id": item_id,
+        "source_video_id": video_id,
+        "source_category": image_in_video_category(item),
+        "video_path": str(video_path),
+        "timestamp": timestamp,
+        "actual_timestamp": actual_timestamp,
+        "frame_index": frame_index,
+    }
+
+
+def build_image_in_video_options(
+    item: dict[str, Any],
+    all_items: list[dict[str, Any]],
+    images_dir: Path,
+    multi_view_video_root: Path,
+    video_exts: tuple[str, ...],
+    view_name: str,
+    view_dir: str,
+    video_cache: dict[tuple[str, str], Path],
+) -> list[dict[str, Any]]:
+    item_id = str(item["id"])
+    option_rows: list[dict[str, Any]] = [
+        {
+            **image_in_video_option_image(
+                item=item,
+                view_name=view_name,
+                view_dir=view_dir,
+                role="correct",
+                images_dir=images_dir,
+                multi_view_video_root=multi_view_video_root,
+                video_exts=video_exts,
+                video_cache=video_cache,
+            ),
+            "is_correct": True,
+            "distractor_type": None,
+        }
+    ]
+
+    same_video_other_category = image_in_video_candidate_items(
+        item, all_items, same_video=True, same_category=False, count=2, seed_suffix="same_video_other_category"
+    )
+    if len(same_video_other_category) < 2:
+        raise ValueError(
+            f"Not enough same-video different-category distractors for {item_id}: "
+            f"need 2, got {len(same_video_other_category)}"
+        )
+    for index, row in enumerate(same_video_other_category, 1):
+        option_rows.append(
+            {
+                **image_in_video_option_image(
+                    item=row,
+                    view_name=view_name,
+                    view_dir=view_dir,
+                    role=f"same_video_other_category_{index}",
+                    images_dir=images_dir,
+                    multi_view_video_root=multi_view_video_root,
+                    video_exts=video_exts,
+                    video_cache=video_cache,
+                ),
+                "is_correct": False,
+                "distractor_type": "same_video_other_category",
+            }
+        )
+
+    other_video_same_category = image_in_video_candidate_items(
+        item, all_items, same_video=False, same_category=True, count=1, seed_suffix="other_video_same_category"
+    )
+    if len(other_video_same_category) < 1:
+        raise ValueError(f"Not enough other-video same-category distractors for {item_id}: need 1, got 0")
+    option_rows.append(
+        {
+            **image_in_video_option_image(
+                item=other_video_same_category[0],
+                view_name=view_name,
+                view_dir=view_dir,
+                role="other_video_same_category",
+                images_dir=images_dir,
+                multi_view_video_root=multi_view_video_root,
+                video_exts=video_exts,
+                video_cache=video_cache,
+            ),
+            "is_correct": False,
+            "distractor_type": "other_video_same_category",
+        }
+    )
+
+    other_video_other_category = image_in_video_candidate_items(
+        item, all_items, same_video=False, same_category=False, count=1, seed_suffix="other_video_other_category"
+    )
+    if len(other_video_other_category) < 1:
+        raise ValueError(f"Not enough other-video different-category distractors for {item_id}: need 1, got 0")
+    option_rows.append(
+        {
+            **image_in_video_option_image(
+                item=other_video_other_category[0],
+                view_name=view_name,
+                view_dir=view_dir,
+                role="other_video_other_category",
+                images_dir=images_dir,
+                multi_view_video_root=multi_view_video_root,
+                video_exts=video_exts,
+                video_cache=video_cache,
+            ),
+            "is_correct": False,
+            "distractor_type": "other_video_other_category",
+        }
+    )
+
+    option_rows.append(
+        {
+            "type": "none",
+            "text": NONE_OPTION_TEXT,
+            "image_path": None,
+            "view": None,
+            "role": "none_option",
+            "source_item_id": None,
+            "source_video_id": None,
+            "source_category": None,
+            "is_correct": False,
+            "distractor_type": "none",
+            "is_none_option": True,
+        }
+    )
+
+    shuffled = deterministic_option_texts(
+        f"{item_id}|image_in_video_options",
+        [json.dumps(row, sort_keys=True) for row in option_rows],
+    )
+    row_by_json = {json.dumps(row, sort_keys=True): row for row in option_rows}
+    return [
+        {
+            "id": chr(ord("A") + index),
+            "is_none_option": row_by_json[row].get("type") == "none",
+            **row_by_json[row],
+        }
+        for index, row in enumerate(shuffled)
+    ]
+
+
+def build_image_in_video_items(
+    time_items: list[dict[str, Any]],
+    clips_dir: Path,
+    images_dir: Path,
+    multi_view_video_root: Path | None,
+    video_exts: tuple[str, ...],
+    views: dict[str, str],
+    question: str,
+    view_name: str,
+    no_media: bool,
+) -> list[dict[str, Any]]:
+    if no_media:
+        raise ValueError("image_in_video task requires media extraction. Set no_media=false in config or pass --extract-media.")
+    if multi_view_video_root is None:
+        raise ValueError("image_in_video task requires --multi-view-video-root.")
+    if view_name not in views:
+        raise ValueError(f"image_in_video view {view_name!r} is not present in --views")
+
+    view_dir = views[view_name]
+    video_cache: dict[tuple[str, str], Path] = {}
+    output_items: list[dict[str, Any]] = []
+    for item in time_items:
+        item_id = str(item["id"])
+        video_id = str(item["video_id"])
+        start = float(item["answer_seconds"]["start"])
+        end = float(item["answer_seconds"]["end"])
+        video_path = video_cache.get((view_name, video_id))
+        if video_path is None:
+            video_path = multiview_video_path_for(
+                video_id=video_id,
+                multi_view_video_root=multi_view_video_root,
+                view_dir=view_dir,
+                video_exts=video_exts,
+            )
+            video_cache[(view_name, video_id)] = video_path
+        clip_path = clips_dir / view_name / video_id / f"{safe_filename(video_id)}_{safe_filename(item_id)}_{start:.3f}_{end:.3f}_{safe_filename(view_name)}.mp4"
+        clip_info = extract_clip(video_path, start, end, clip_path)
+        options = build_image_in_video_options(
+            item=item,
+            all_items=time_items,
+            images_dir=images_dir,
+            multi_view_video_root=multi_view_video_root,
+            video_exts=video_exts,
+            view_name=view_name,
+            view_dir=view_dir,
+            video_cache=video_cache,
+        )
+        correct_option = next(option for option in options if option.get("is_correct"))
+        option_lines = [
+            f"{option['id']}. {option['text']}"
+            if option.get("is_none_option")
+            else f"{option['id']}. <image: {option['image_path']}>"
+            for option in options
+        ]
+        full_question = f"{question}\nOptions:\n" + "\n".join(option_lines)
+        output_items.append(
+            {
+                "id": f"{item_id}_image_in_video",
+                "source_id": item_id,
+                "video_id": video_id,
+                "type": "image_in_video",
+                "view": view_name,
+                "input": {
+                    "clip_path": str(clip_path),
+                    "clip_paths": [str(clip_path)],
+                    "video_path": str(clip_path),
+                    "video_paths": [str(clip_path)],
+                    "source_video_path": str(video_path),
+                    "start": start,
+                    "end": end,
+                    **clip_info,
+                },
+                "Q": full_question,
+                "A": correct_option["id"],
+                "question": full_question,
+                "answer": correct_option["id"],
+                "answer_text": "the option image that appeared in the video clip",
+                "answer_category": image_in_video_category(item),
+                "answer_seconds": {"start": start, "end": end},
+                "options": options,
+                "correct_option": correct_option,
+                "source_time_eqa": item,
+            }
+        )
     return output_items
 
 
@@ -1727,7 +2062,7 @@ def build_understanding_items(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build Time, Understanding, and Left/Right VQA JSON from segment files.")
+    parser = argparse.ArgumentParser(description="Build Time, Understanding, Left/Right, and image-in-video VQA JSON from segment files.")
     parser.set_defaults(**{})
     parser.add_argument("--config", type=Path, default=None, help="JSON config path. CLI arguments override config values.")
     parser.add_argument("--data-dir", type=Path, default=argparse.SUPPRESS)
@@ -1744,7 +2079,7 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path, default=argparse.SUPPRESS)
     parser.add_argument("--video-exts", default=argparse.SUPPRESS)
-    parser.add_argument("--tasks", default=argparse.SUPPRESS, help="Comma-separated: time,understanding,left_right")
+    parser.add_argument("--tasks", default=argparse.SUPPRESS, help="Comma-separated: time,understanding,left_right,image_in_video")
     parser.add_argument("--file-limit", type=int, default=argparse.SUPPRESS)
     parser.add_argument("--category-label-path", type=Path, default=argparse.SUPPRESS)
     parser.add_argument("--num-options", type=int, default=argparse.SUPPRESS)
@@ -1767,6 +2102,8 @@ def main() -> int:
     parser.add_argument("--time-question", default=argparse.SUPPRESS)
     parser.add_argument("--understanding-question", default=argparse.SUPPRESS)
     parser.add_argument("--left-right-question", default=argparse.SUPPRESS)
+    parser.add_argument("--image-in-video-question", default=argparse.SUPPRESS)
+    parser.add_argument("--image-in-video-view", default=argparse.SUPPRESS)
     parser.add_argument("--left-right-target-side", choices=["left", "right", "both", "alternate"], default=argparse.SUPPRESS)
     parser.add_argument("--left-right-timestamp-key", choices=["start", "mid", "end"], default=argparse.SUPPRESS)
     parser.add_argument("--left-right-head-view", default=argparse.SUPPRESS)
@@ -1810,7 +2147,7 @@ def main() -> int:
     args = argparse.Namespace(**merge_config(config_path, raw_args))
 
     tasks = {task.strip() for task in str(args.tasks).split(",") if task.strip()}
-    unknown_tasks = tasks - {"time", "understanding", "left_right"}
+    unknown_tasks = tasks - {"time", "understanding", "left_right", "image_in_video"}
     if unknown_tasks:
         raise ValueError(f"Unknown tasks: {sorted(unknown_tasks)}")
 
@@ -1834,7 +2171,7 @@ def main() -> int:
         time_cropped_video_dir=time_cropped_video_dir,
         time_crop_top_fraction=args.time_crop_top_fraction,
         overwrite_time_crop=args.overwrite_time_crop,
-        no_media=args.no_media,
+        no_media=args.no_media or "time" not in tasks,
     )
     category_labels = load_category_labels(args.category_label_path, time_items)
     task_name = task_name_from_category_label_path(args.category_label_path)
@@ -1956,6 +2293,39 @@ def main() -> int:
                     "scene_distractors": 2,
                 },
                 "items": left_right_items,
+            },
+        )
+
+    if "image_in_video" in tasks:
+        image_in_video_items = build_image_in_video_items(
+            time_items,
+            clips_dir=args.output_dir / "image_in_video_clips",
+            images_dir=args.output_dir / "image_in_video_vqa",
+            multi_view_video_root=multi_view_video_root,
+            video_exts=video_exts,
+            views=views,
+            question=args.image_in_video_question,
+            view_name=args.image_in_video_view,
+            no_media=args.no_media,
+        )
+        save_json(
+            args.output_dir / "image_in_video_vqa.json",
+            {
+                **common,
+                "task": "image_in_video_matching",
+                "clips_dir": str(args.output_dir / "image_in_video_clips"),
+                "images_dir": str(args.output_dir / "image_in_video_vqa"),
+                "question": args.image_in_video_question,
+                "view": args.image_in_video_view,
+                "option_design": {
+                    "num_options": 6,
+                    "correct": 1,
+                    "none": 1,
+                    "same_video_other_category_distractors": 2,
+                    "other_video_same_category_distractors": 1,
+                    "other_video_other_category_distractors": 1,
+                },
+                "items": image_in_video_items,
             },
         )
 
