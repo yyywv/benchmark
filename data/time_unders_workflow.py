@@ -1487,6 +1487,10 @@ def image_in_video_option_image(
     multi_view_video_root: Path,
     video_exts: tuple[str, ...],
     video_cache: dict[tuple[str, str], Path],
+    crop_time_video_top: bool,
+    time_cropped_video_dir: Path,
+    time_crop_top_fraction: float,
+    overwrite_time_crop: bool,
 ) -> dict[str, Any]:
     video_id = str(item["video_id"])
     item_id = str(item["id"])
@@ -1502,6 +1506,10 @@ def image_in_video_option_image(
             view_dir=view_dir,
             video_exts=video_exts,
         )
+        if crop_time_video_top:
+            original_video_path = video_path
+            video_path = time_cropped_video_dir / view_name / f"{video_id}{original_video_path.suffix}"
+            crop_video_top(original_video_path, video_path, time_crop_top_fraction, overwrite_time_crop)
         video_cache[cache_key] = video_path
 
     image_name = (
@@ -1520,6 +1528,8 @@ def image_in_video_option_image(
         "source_video_id": video_id,
         "source_category": image_in_video_category(item),
         "video_path": str(video_path),
+        "crop_top_applied": crop_time_video_top,
+        "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
         "timestamp": timestamp,
         "actual_timestamp": actual_timestamp,
         "frame_index": frame_index,
@@ -1535,6 +1545,10 @@ def build_image_in_video_options(
     view_name: str,
     view_dir: str,
     video_cache: dict[tuple[str, str], Path],
+    crop_time_video_top: bool,
+    time_cropped_video_dir: Path,
+    time_crop_top_fraction: float,
+    overwrite_time_crop: bool,
 ) -> list[dict[str, Any]]:
     item_id = str(item["id"])
     option_rows: list[dict[str, Any]] = [
@@ -1548,6 +1562,10 @@ def build_image_in_video_options(
                 multi_view_video_root=multi_view_video_root,
                 video_exts=video_exts,
                 video_cache=video_cache,
+                crop_time_video_top=crop_time_video_top,
+                time_cropped_video_dir=time_cropped_video_dir,
+                time_crop_top_fraction=time_crop_top_fraction,
+                overwrite_time_crop=overwrite_time_crop,
             ),
             "is_correct": True,
             "distractor_type": None,
@@ -1574,6 +1592,10 @@ def build_image_in_video_options(
                     multi_view_video_root=multi_view_video_root,
                     video_exts=video_exts,
                     video_cache=video_cache,
+                    crop_time_video_top=crop_time_video_top,
+                    time_cropped_video_dir=time_cropped_video_dir,
+                    time_crop_top_fraction=time_crop_top_fraction,
+                    overwrite_time_crop=overwrite_time_crop,
                 ),
                 "is_correct": False,
                 "distractor_type": "same_video_other_category",
@@ -1596,6 +1618,10 @@ def build_image_in_video_options(
                 multi_view_video_root=multi_view_video_root,
                 video_exts=video_exts,
                 video_cache=video_cache,
+                crop_time_video_top=crop_time_video_top,
+                time_cropped_video_dir=time_cropped_video_dir,
+                time_crop_top_fraction=time_crop_top_fraction,
+                overwrite_time_crop=overwrite_time_crop,
             ),
             "is_correct": False,
             "distractor_type": "other_video_same_category",
@@ -1618,6 +1644,10 @@ def build_image_in_video_options(
                 multi_view_video_root=multi_view_video_root,
                 video_exts=video_exts,
                 video_cache=video_cache,
+                crop_time_video_top=crop_time_video_top,
+                time_cropped_video_dir=time_cropped_video_dir,
+                time_crop_top_fraction=time_crop_top_fraction,
+                overwrite_time_crop=overwrite_time_crop,
             ),
             "is_correct": False,
             "distractor_type": "other_video_other_category",
@@ -1665,6 +1695,10 @@ def build_image_in_video_items(
     question: str,
     view_name: str,
     no_media: bool,
+    crop_time_video_top: bool,
+    time_cropped_video_dir: Path,
+    time_crop_top_fraction: float,
+    overwrite_time_crop: bool,
 ) -> list[dict[str, Any]]:
     if no_media:
         raise ValueError("image_in_video task requires media extraction. Set no_media=false in config or pass --extract-media.")
@@ -1689,6 +1723,10 @@ def build_image_in_video_items(
                 view_dir=view_dir,
                 video_exts=video_exts,
             )
+            original_video_path = video_path
+            if crop_time_video_top:
+                video_path = time_cropped_video_dir / view_name / f"{video_id}{original_video_path.suffix}"
+                crop_video_top(original_video_path, video_path, time_crop_top_fraction, overwrite_time_crop)
             video_cache[(view_name, video_id)] = video_path
         clip_path = clips_dir / view_name / video_id / f"{safe_filename(video_id)}_{safe_filename(item_id)}_{start:.3f}_{end:.3f}_{safe_filename(view_name)}.mp4"
         clip_info = extract_clip(video_path, start, end, clip_path)
@@ -1701,6 +1739,10 @@ def build_image_in_video_items(
             view_name=view_name,
             view_dir=view_dir,
             video_cache=video_cache,
+            crop_time_video_top=crop_time_video_top,
+            time_cropped_video_dir=time_cropped_video_dir,
+            time_crop_top_fraction=time_crop_top_fraction,
+            overwrite_time_crop=overwrite_time_crop,
         )
         correct_option = next(option for option in options if option.get("is_correct"))
         option_lines = [
@@ -1723,6 +1765,8 @@ def build_image_in_video_items(
                     "video_path": str(clip_path),
                     "video_paths": [str(clip_path)],
                     "source_video_path": str(video_path),
+                    "crop_top_applied": crop_time_video_top,
+                    "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
                     "start": start,
                     "end": end,
                     **clip_info,
@@ -2307,6 +2351,10 @@ def main() -> int:
             question=args.image_in_video_question,
             view_name=args.image_in_video_view,
             no_media=args.no_media,
+            crop_time_video_top=args.crop_time_video_top,
+            time_cropped_video_dir=time_cropped_video_dir,
+            time_crop_top_fraction=args.time_crop_top_fraction,
+            overwrite_time_crop=args.overwrite_time_crop,
         )
         save_json(
             args.output_dir / "image_in_video_vqa.json",

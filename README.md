@@ -9,6 +9,7 @@ This repository provides a reproducible workflow benchmark for evaluating VLMs o
 ## Contents
 
 - [Overview](#overview)
+- [Update Log](#update-log)
 - [Tasks](#tasks)
 - [Generate VQA Data](#generate-vqa-data)
 - [Generation Protocol Notes](#generation-protocol-notes)
@@ -29,6 +30,10 @@ The generated JSON files are evaluated by scripts in `test/`, with model calls u
 | --- | --- | --- |
 | Time and understanding | `time`, `understanding`, `left_right`, `image_in_video` | `data/time_unders_workflow_config.json` |
 | Planning and trajectories | `planning`, `planning_2`, `step_order`, `trajectory` | `data/planning_workflow_config.json` |
+
+## Update Log
+
+- 2026-08-04 19:27 +08:00: `image_in_video` generation now honors `--crop-time-video-top`; both the generated clip and option images are extracted from the top-cropped source video when enabled.
 
 ## Repository Structure
 
@@ -109,7 +114,7 @@ Some media-generation paths also require `ffmpeg` to be available in `PATH`.
 | **Video roots** | `video_dir`, `multi_view_video_root`, and `views` match the local video layout. |
 | **Output location** | `output_dir` is separate from evaluation result files. |
 | **Category labels** | `category_label_path` points to a clearly named task-level txt file. |
-| **Timestamp overlays** | For `left_right`, `step_order`, and `image_in_video`, set `crop_time_video_top=true` if timestamps appear in the video frame. |
+| **Timestamp overlays** | For `time` and `image_in_video`, set `crop_time_video_top=true` if timestamps appear in the top of the video frame. |
 
 Generate Time, Understanding, Left/Right, and Image-in-Video tasks:
 
@@ -148,7 +153,9 @@ and `views` includes `left_eye`:
 python data/time_unders_workflow.py \
   --config data/time_unders_workflow_config.json \
   --tasks image_in_video \
-  --image-in-video-view left_eye
+  --image-in-video-view left_eye \
+  --crop-time-video-top \
+  --time-crop-top-fraction 0.1
 ```
 
 On Windows, frame extraction writes images with a Unicode-path-safe OpenCV path,
@@ -162,7 +169,7 @@ The following protocol details are important for obtaining fair and reproducible
 | --- | --- | --- |
 | **LLM-generated distractors** | `planning`, `planning_2`, `understanding` | These VQA generators can call an external large model to produce wrong answer options. Control this with `use_llm_distractors`, `llm_distractor_api_url`, `llm_distractor_api_key_env`, and `llm_distractor_model`. |
 | **Category txt semantics** | `planning`, `planning_2`, `understanding` | The generator reads both the `category_label_path` file name and its contents as category context. The file name should summarize the whole task category as a concise phrase. |
-| **Timestamp cropping** | `left_right`, `step_order`, `image_in_video` | If source videos contain visible timestamp overlays, set `crop_time_video_top` to `true` before generating VQA data, or pass `--crop-time-video-top` from the command line. |
+| **Timestamp cropping** | `time`, `image_in_video`, `step_order` | If source videos contain visible timestamp overlays, set the relevant crop flag to `true` before generating VQA data, or pass `--crop-time-video-top` from the command line where supported. |
 
 | **Category txt Naming Guideline** | **Example** |
 | --- | --- |
@@ -172,9 +179,9 @@ The following protocol details are important for obtaining fair and reproducible
 
 | **Timestamp Crop Guideline** | **Configuration** |
 | --- | --- |
-| **Left/right gripper-view matching** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`. |
+| **Time EQA** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`. |
+| **Image-in-video matching** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`; the generated clip and option images will use the cropped video. |
 | **Step ordering** | Set `crop_time_video_top=true` in `data/planning_workflow_config.json`. |
-| **Image-in-video matching** | Set `crop_time_video_top=true` in `data/time_unders_workflow_config.json`. |
 | **Crop height** | Adjust `time_crop_top_fraction` if the timestamp overlay occupies a larger or smaller top region. |
 
 ## Configuration Notes
@@ -194,7 +201,7 @@ Important fields in the generation configs:
 - `window_mode`: temporal window mode, one of `raw`, `transition`, or `legacy_pickplace`.
 - `image_in_video_question`: question text for image-in-video matching.
 - `image_in_video_view`: source view for image-in-video clips and option images; currently use `left_eye`.
-- `crop_time_video_top`: set to `true` when source videos contain visible top timestamp overlays, especially for `left_right`, `step_order`, and `image_in_video`.
+- `crop_time_video_top`: set to `true` when source videos contain visible top timestamp overlays. In `time_unders_workflow.py`, this applies to `time` and `image_in_video`; `step_order` uses the matching setting in `planning_workflow.py`.
 - `time_crop_top_fraction`: fraction of the top frame area to remove when `crop_time_video_top` is enabled.
 
 The current configs can use external LLMs for distractor generation through the API keys configured in `data/*_config.json`.
