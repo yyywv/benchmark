@@ -6,6 +6,7 @@ Supported provider types:
   - openai_compatible: GLM, Qwen compatible-mode, Kimi, Ark, vLLM, and similar chat/completions APIs
   - gemini: Gemini generateContent REST API
   - local_qwen: local Qwen-VL weights loaded by transformers
+  - local_transformers_vlm: local image-text-to-text weights loaded by transformers
   - local_internvl: local InternVL weights loaded by transformers
 """
 
@@ -27,6 +28,7 @@ DEFAULT_GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 _LOCAL_QWEN_MODEL: Any | None = None
 _LOCAL_QWEN_PROCESSOR: Any | None = None
 _LOCAL_QWEN_MODEL_NAME: str | None = None
+_LOCAL_TRANSFORMERS_VLM_MODELS: dict[str, tuple[Any, Any]] = {}
 _LOCAL_INTERNVL_MODEL: Any | None = None
 _LOCAL_INTERNVL_TOKENIZER: Any | None = None
 _LOCAL_INTERNVL_MODEL_NAME: str | None = None
@@ -134,7 +136,7 @@ def runtime_config(
     model = cli_model or model_from_env or provider.get("model") or default_model
     api_url_env = provider.get("api_url_env")
     api_url_from_env = os.getenv(str(api_url_env)) if api_url_env else None
-    local_provider = provider_type in {"local_qwen", "local_internvl"}
+    local_provider = provider_type in {"local_qwen", "local_transformers_vlm", "local_internvl"}
     api_url = str(api_url_from_env or provider.get("api_url") or ("" if local_provider else default_api_url))
     temperature = cli_temperature if cli_temperature is not None else provider.get("temperature", defaults.get("temperature", 0.0))
     thinking = cli_thinking if cli_thinking is not None else provider.get("thinking", defaults.get("thinking", "disabled"))
@@ -265,6 +267,104 @@ def request_local_qwen(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> 
     from qwen_vl_utils import process_vision_info
 
     local_model, processor = load_local_qwen(runtime["model"])
+    messages = [
+        {"role": "system", "content": runtime["system_prompt"]},
+        {"role": "user", "content": local_qwen_content(parts)},
+    ]
+    try:
+        text = processor.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+    except TypeError:
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    try:
+        image_inputs, video_inputs, video_kwargs = process_vision_info(
+            messages,
+            return_video_kwargs=True,
+            return_video_metadata=True,
+        )
+    except TypeError:
+        image_inputs, video_inputs = process_vision_info(messages)
+        video_kwargs = {}
+
+    if video_inputs and isinstance(video_inputs[0], tuple):
+        videos = []
+        video_metadata = []
+        for video_input in video_inputs:
+            video, metadata = video_input
+            videos.append(video)
+            video_metadata.append(metadata)
+        video_inputs = videos
+        video_kwargs["video_metadata"] = video_metadata
+
+    device = next(local_model.parameters()).device
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+        **video_kwargs,
+    ).to(device)
+
+    do_sample = runtime["temperature"] > 0
+    generate_kwargs: dict[str, Any] = {
+        "max_new_tokens": runtime["max_new_tokens"],
+        "do_sample": do_sample,
+    }
+    if do_sample:
+        generate_kwargs["temperature"] = runtime["temperature"]
+    eos_token_id = getattr(getattr(processor, "tokenizer", None), "eos_token_id", None)
+    if eos_token_id is not None:
+        generate_kwargs["pad_token_id"] = eos_token_id
+
+    with torch.no_grad():
+        output_ids = local_model.generate(**inputs, **generate_kwargs)
+    new_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+    output_text = processor.batch_decode(new_ids, skip_special_tokens=True)[0].strip()
+    return {
+        "choices": [{"message": {"content": output_text}}],
+        "model": runtime["model"],
+        "local_weights": runtime["model"],
+    }
+
+
+def load_local_transformers_vlm(model_name: str) -> tuple[Any, Any]:
+    cached = _LOCAL_TRANSFORMERS_VLM_MODELS.get(model_name)
+    if cached is not None:
+        return cached
+
+    import torch
+
+    if not hasattr(torch, "float8_e8m0fnu"):
+        torch.float8_e8m0fnu = torch.uint8
+
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    model_path = Path(model_name).expanduser()
+    resolved_model = str(model_path) if model_path.exists() else model_name
+    print(f"Loading local transformers VLM: {resolved_model}", flush=True)
+    processor = AutoProcessor.from_pretrained(resolved_model, trust_remote_code=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        resolved_model,
+        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+    _LOCAL_TRANSFORMERS_VLM_MODELS[model_name] = (model, processor)
+    return model, processor
+
+
+def request_local_transformers_vlm(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[str, Any]:
+    import torch
+    from qwen_vl_utils import process_vision_info
+
+    local_model, processor = load_local_transformers_vlm(runtime["model"])
     messages = [
         {"role": "system", "content": runtime["system_prompt"]},
         {"role": "user", "content": local_qwen_content(parts)},
@@ -637,6 +737,8 @@ def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[s
     provider_type = runtime["type"]
     if provider_type == "local_qwen":
         return request_local_qwen(runtime, parts)
+    if provider_type == "local_transformers_vlm":
+        return request_local_transformers_vlm(runtime, parts)
     if provider_type == "local_internvl":
         return request_local_internvl(runtime, parts)
     if provider_type == "gemini":

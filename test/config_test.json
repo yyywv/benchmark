@@ -11,11 +11,11 @@
       "internvl": "InternVL typically requires a local or third-party OpenAI-compatible service; use INTERNVL_API_URL to override the address, no API key required by default.",
       "local_internvl_8b": "Local InternVL3.5-8B weights, loaded via transformers with local frame extraction, no API key needed; use INTERNVL_MODEL_PATH or --model to point to the weights directory.",
       "local_qwen": "Locally deployed Qwen-VL, loaded via transformers with local weights, no API key needed.",
-      "local_rynnbrain_2b": "Local RynnBrain-2B served through an OpenAI-compatible /v1/chat/completions endpoint.",
-      "local_rynnbrain11_2b": "Local RynnBrain1.1-2B served through an OpenAI-compatible /v1/chat/completions endpoint.",
-      "local_cosmos3_edge_2b": "Local Cosmos 3-edge 2B served through an OpenAI-compatible /v1/chat/completions endpoint.",
-      "local_cosmos_reason_2b": "Local Cosmos-reason 2B served through an OpenAI-compatible /v1/chat/completions endpoint.",
-      "local_sensenova_si_1_1_internvl32b": "Local SenseNova-SI-1.1 InternVL32B served through an OpenAI-compatible /v1/chat/completions endpoint."
+      "local_rynnbrain_2b": "Local RynnBrain-2B weights, loaded directly by transformers; use RYNNBRAIN_2B_MODEL_PATH or --model.",
+      "local_rynnbrain11_2b": "Local RynnBrain1.1-2B weights, loaded directly by transformers; use RYNNBRAIN11_2B_MODEL_PATH or --model.",
+      "local_cosmos3_edge_2b": "Local Cosmos 3-edge 2B weights, loaded directly by transformers; use COSMOS3_EDGE_MODEL_PATH or --model.",
+      "local_cosmos_reason_2b": "Local Cosmos-reason 2B weights, loaded directly by transformers; use COSMOS_REASON_2B_MODEL_PATH or --model.",
+      "local_sensenova_si_1_1_internvl32b": "Local SenseNova-SI-1.1 InternVL32B weights, loaded directly with the InternVL adapter; use SENSENOVA_SI_1_1_INTERNVL32B_MODEL_PATH or --model."
     },
     "media_url_format": {
       "base64": "Place base64 string directly in OpenAI-compatible payload; suited for current GLM usage.",
@@ -27,7 +27,7 @@
       "seed": "Use --provider seed --model Seed2.1 or --model Seed2.0-Lite to switch.",
       "internvl": "Use --provider internvl --model InternVL3.5-8B or --model InternVL3.5-30B-A3B to switch; set INTERNVL_API_URL if needed.",
       "local_internvl_8b": "Use --provider local_internvl_8b; use INTERNVL_MODEL_PATH or --model /path/to/InternVL3.5-8B to point to local weights directory.",
-      "local_openai_compatible": "Use --provider local_rynnbrain_2b / local_rynnbrain11_2b / local_cosmos3_edge_2b / local_cosmos_reason_2b / local_sensenova_si_1_1_internvl32b after starting the corresponding local model server.",
+      "local_weight_paths": "Use --provider local_rynnbrain_2b / local_rynnbrain11_2b / local_cosmos3_edge_2b / local_cosmos_reason_2b / local_sensenova_si_1_1_internvl32b with --model /path/to/weights or the matching *_MODEL_PATH env var.",
       "gemini": "Use --provider gemini --model gemini-3.1-pro-preview or --model gemini-3.5-flash to switch; defaults to https://cheeseapi.top/v1.",
       "kimi": "Defaults to kimi-k2.6; use --model to override if the server model name differs.",
       "glm": "Defaults to glm-5v-turbo; use --model to override if the server model name differs.",
@@ -122,49 +122,49 @@
       "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_rynnbrain_2b": {
-      "type": "openai_compatible",
-      "api_url": "http://localhost:8000/v1/chat/completions",
-      "api_url_env": "RYNNBRAIN_2B_API_URL",
-      "api_key_env": "RYNNBRAIN_2B_API_KEY",
-      "require_api_key": false,
-      "model": "RynnBrain-2B",
-      "media_url_format": "data_url"
+      "type": "local_transformers_vlm",
+      "model": "/home/llm/hdd/RynnBrain-2B",
+      "model_env": "RYNNBRAIN_2B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_rynnbrain11_2b": {
-      "type": "openai_compatible",
-      "api_url": "http://localhost:8001/v1/chat/completions",
-      "api_url_env": "RYNNBRAIN11_2B_API_URL",
-      "api_key_env": "RYNNBRAIN11_2B_API_KEY",
-      "require_api_key": false,
-      "model": "RynnBrain1.1-2B",
-      "media_url_format": "data_url"
+      "type": "local_transformers_vlm",
+      "model": "/home/llm/hdd/RynnBrain1.1-2B",
+      "model_env": "RYNNBRAIN11_2B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_cosmos3_edge_2b": {
-      "type": "openai_compatible",
-      "api_url": "http://localhost:8002/v1/chat/completions",
-      "api_url_env": "COSMOS3_EDGE_2B_API_URL",
-      "api_key_env": "COSMOS3_EDGE_2B_API_KEY",
-      "require_api_key": false,
-      "model": "Cosmos-3-edge-2B",
-      "media_url_format": "data_url"
+      "type": "local_transformers_vlm",
+      "model": "/ssd/Cosmos3-Edge",
+      "model_env": "COSMOS3_EDGE_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_cosmos_reason_2b": {
-      "type": "openai_compatible",
-      "api_url": "http://localhost:8003/v1/chat/completions",
-      "api_url_env": "COSMOS_REASON_2B_API_URL",
-      "api_key_env": "COSMOS_REASON_2B_API_KEY",
-      "require_api_key": false,
-      "model": "Cosmos-reason-2B",
-      "media_url_format": "data_url"
+      "type": "local_transformers_vlm",
+      "model": "/home/llm/hdd/Cosmos-Reason2-2B",
+      "model_env": "COSMOS_REASON_2B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_sensenova_si_1_1_internvl32b": {
-      "type": "openai_compatible",
-      "api_url": "http://localhost:8004/v1/chat/completions",
-      "api_url_env": "SENSENOVA_SI_1_1_INTERNVL32B_API_URL",
-      "api_key_env": "SENSENOVA_SI_1_1_INTERNVL32B_API_KEY",
-      "require_api_key": false,
-      "model": "SenseNova-SI-1.1-InternVL32B",
-      "media_url_format": "data_url"
+      "type": "local_internvl",
+      "model": "/home/llm/hdd/SenseNova-SI-1.1-InternVL32B",
+      "model_env": "SENSENOVA_SI_1_1_INTERNVL32B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "num_segments": 4,
+      "video_sample_fps": 1.0,
+      "max_image_tiles": 4,
+      "max_video_tiles": 1,
+      "use_flash_attn": false,
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     }
   },
   "tasks": {
