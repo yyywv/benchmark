@@ -1,6 +1,24 @@
 # Robot VLM Workflow Benchmark
 
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#installation)
+[![Tasks](https://img.shields.io/badge/VQA%20Tasks-8-2ea44f)](#tasks)
+[![Models](https://img.shields.io/badge/Models-15-8a63d2)](#supported-providers-and-exact-model-names)
+
 This project builds and evaluates visual-language-model (VLM) question-answering benchmarks for robot pick/place workflows. It focuses on egocentric and multi-view robot videos, converting annotated action segments into VQA-style JSON files and then evaluating different VLMs on temporal grounding, state understanding, planning, viewpoint matching, step ordering, and trajectory prediction.
+
+> [!TIP]
+> Start with `data/*_config.json`, generate VQA files with `data/*_workflow.py`,
+> then evaluate them with the scripts in `test/`.
+
+## Quick Links
+
+- [Overview](#overview)
+- [Tasks](#tasks)
+- [Generate VQA Data](#generate-vqa-data)
+- [Task-Specific Notes](#task-specific-notes)
+- [Configuration Notes](#configuration-notes)
+- [Evaluate Models](#evaluate-models)
+- [Supported Providers and Exact Model Names](#supported-providers-and-exact-model-names)
 
 ## Overview
 
@@ -10,6 +28,11 @@ The workflow contains two dataset-generation pipelines:
 - `data/planning_workflow.py`: generates next-action Planning, goal-conditioned Planning, Step Order, and 2D/3D Trajectory prediction tasks.
 
 The generated JSON files are evaluated by scripts in `test/`, with model calls unified through `test/vlm_api.py`.
+
+| Pipeline | Main tasks | Main config |
+| --- | --- | --- |
+| Time and understanding | `time`, `understanding`, `left_right`, `image_in_video` | `data/time_unders_workflow_config.json` |
+| Planning and trajectories | `planning`, `planning_2`, `step_order`, `trajectory` | `data/planning_workflow_config.json` |
 
 ## Repository Structure
 
@@ -84,6 +107,10 @@ Some media-generation paths also require `ffmpeg` to be available in `PATH`.
 
 ## Generate VQA Data
 
+> [!NOTE]
+> VQA generation is config-driven. Check `data_dir`, video roots, output paths,
+> task names, and category label files before running a full generation job.
+
 Generate Time, Understanding, Left/Right, and Image-in-Video tasks:
 
 ```bash
@@ -128,6 +155,30 @@ On Windows, frame extraction writes images with a Unicode-path-safe OpenCV path,
 so workspaces whose paths contain non-ASCII characters are supported.
 
 ## Task-Specific Notes
+
+> [!WARNING]
+> **Planning and understanding distractors**
+>
+> When generating VQA data for `planning`, `planning_2`, and `understanding`,
+> the workflow can call an external large model to generate wrong answer
+> options. Enable or disable this with `use_llm_distractors`, and configure the
+> endpoint through `llm_distractor_api_url`, `llm_distractor_api_key_env`, and
+> `llm_distractor_model`.
+>
+> These tasks also read the category label text file set by
+> `category_label_path`. The file name and file contents are both used as
+> category context, so name the txt file with a broad phrase that clearly
+> describes the whole task category, for example `stack_all_cubes.txt` for a
+> stack-all-cubes task. Avoid vague names such as `labels.txt` or
+> `category.txt`.
+
+> [!IMPORTANT]
+> **Category txt file naming**
+>
+> Use a concise, descriptive, task-level phrase for the category txt file name:
+> `stack_all_cubes.txt`, `pick_and_place_blocks.txt`, or
+> `sort_colored_objects.txt`. The contents should list the valid action or
+> category labels for that same task family, one label per line.
 
 > [!IMPORTANT]
 > **Left/right gripper-view matching (`left_right`)**
@@ -187,7 +238,7 @@ Important fields in the generation configs:
 - `views`: mapping from logical view names to video subdirectories.
 - `output_dir`: generated VQA output directory.
 - `tasks`: task list to generate.
-- `category_label_path`: candidate action labels, such as `stack_all_cubes.txt`.
+- `category_label_path`: candidate action labels, such as `stack_all_cubes.txt`; use a descriptive task-level file name because the generator reads both the file name and contents as category context.
 - `num_options`: number of multiple-choice options.
 - `use_llm_distractors`: whether to use an LLM to generate distractor options.
 - `llm_distractor_api_url`, `llm_distractor_api_key_env`, `llm_distractor_model`: API settings for distractor generation.
