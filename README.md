@@ -183,6 +183,7 @@ python test/time_eqa_glm_test_multi.py --config test/config_test.json --provider
 python test/understanding_glm_test.py --config test/config_test.json --provider qwen --model qwen3.7-plus
 python test/left_right_glm_test.py --config test/config_test.json --provider local_internvl_8b --model /path/to/InternVL3.5-8B
 python test/image_in_video_glm_test.py --config test/config_test.json --provider local_qwen --model /path/to/Qwen3-VL-32B-Instruct
+python test/image_in_video_glm_test.py --config test/config_test.json --provider local_cosmos3_edge_2b
 python test/planning_glm_test.py --config test/config_test.json --provider kimi --model kimi-k2.6
 python test/planning_2_glm_test.py --config test/config_test.json --provider gpt --model gpt-5.5
 python test/step_order_glm_test.py --config test/config_test.json --provider gemini --model gemini-3.5-flash
@@ -208,6 +209,11 @@ Model names are passed through the `--model` argument. Use the following exact n
 | Seed2.0-Lite | `seed` | `doubao-seed-2-0-lite-260428` |
 | InternVL3.5-8B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-8B` |
 | InternVL3.5-30B-A3B | `local_internvl_8b` | local weights path, for example `/path/to/InternVL3.5-30B-A3B` |
+| RynnBrain-2B | `local_rynnbrain_2b` | `RynnBrain-2B` |
+| RynnBrain1.1-2B | `local_rynnbrain11_2b` | `RynnBrain1.1-2B` |
+| Cosmos 3-edge 2B | `local_cosmos3_edge_2b` | `Cosmos-3-edge-2B` |
+| Cosmos-reason 2B | `local_cosmos_reason_2b` | `Cosmos-reason-2B` |
+| SenseNova-SI-1.1 InternVL32B | `local_sensenova_si_1_1_internvl32b` | `SenseNova-SI-1.1-InternVL32B` |
 | GLM-5V-Turbo | `glm` | `glm-5v-turbo` |
 | Gemini-3.1-Pro | `gemini` | `gemini-3.1-pro-preview` |
 | Gemini-3.5-Flash | `gemini` | `gemini-3.5-flash` |
@@ -216,6 +222,22 @@ Model names are passed through the `--model` argument. Use the following exact n
 For Seed models, use the exact Ark model id exposed by your Volcengine/Doubao endpoint. The checked-in config currently uses `doubao-seed-2-1-pro-260628` for Seed2.1, and public Ark-related references list Seed2.0-Lite as `doubao-seed-2-0-lite-260428`. If your endpoint exposes a different alias, update the `model` field in `test/config_test.json` or override it with `--model` at runtime.
 
 For remote API providers, use the lowercase model id expected by the endpoint. Local Qwen and local InternVL entries use filesystem paths to the downloaded weights instead of API model ids.
+
+The RynnBrain, Cosmos, and SenseNova entries are configured as local
+OpenAI-compatible services. Start the corresponding model server first, then run
+the evaluation script with the matching provider. The default local endpoints
+are:
+
+| Provider | Default endpoint | Override env var |
+| --- | --- | --- |
+| `local_rynnbrain_2b` | `http://localhost:8000/v1/chat/completions` | `RYNNBRAIN_2B_API_URL` |
+| `local_rynnbrain11_2b` | `http://localhost:8001/v1/chat/completions` | `RYNNBRAIN11_2B_API_URL` |
+| `local_cosmos3_edge_2b` | `http://localhost:8002/v1/chat/completions` | `COSMOS3_EDGE_2B_API_URL` |
+| `local_cosmos_reason_2b` | `http://localhost:8003/v1/chat/completions` | `COSMOS_REASON_2B_API_URL` |
+| `local_sensenova_si_1_1_internvl32b` | `http://localhost:8004/v1/chat/completions` | `SENSENOVA_SI_1_1_INTERNVL32B_API_URL` |
+
+If your server exposes a different model id, override it with `--model` or edit
+the corresponding `model` field in `test/config_test.json`.
 
 ## API Keys
 
@@ -232,6 +254,9 @@ Set the environment variable for the provider you use:
 | `internvl` | `INTERNVL_API_KEY` optional | `INTERNVL_API_URL` or `http://localhost:8000/v1/chat/completions` |
 
 For local InternVL inference, use provider `local_internvl_8b` and set `INTERNVL_MODEL_PATH` or pass `--model /path/to/weights`. For local Qwen inference, use provider `local_qwen` and set the model path in `test/config_test.json` or pass `--model /path/to/weights`.
+For local OpenAI-compatible servers, use one of the `local_rynnbrain_*`,
+`local_cosmos_*`, or `local_sensenova_*` providers; these do not require API keys
+by default.
 
 ## Output Format
 
