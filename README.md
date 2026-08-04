@@ -127,6 +127,41 @@ python data/time_unders_workflow.py \
 On Windows, frame extraction writes images with a Unicode-path-safe OpenCV path,
 so workspaces whose paths contain non-ASCII characters are supported.
 
+## Task-Specific Notes
+
+> [!IMPORTANT]
+> **Left/right gripper-view matching (`left_right`)**
+>
+> If the source videos contain visible timestamp overlays at the top, set
+> `crop_time_video_top` to `true` before generating VQA data. This prevents the
+> model from using timestamp text as an unintended shortcut when matching head
+> and wrist camera views.
+>
+> Configure it in `data/time_unders_workflow_config.json`, or pass
+> `--crop-time-video-top` when running `data/time_unders_workflow.py`.
+
+> [!IMPORTANT]
+> **Step ordering (`step_order`)**
+>
+> If the generated step-order images come from videos with visible timestamp
+> overlays, set `crop_time_video_top` to `true` before generating VQA data. The
+> timestamp should be cropped so the answer depends on visual state changes, not
+> on chronological text shown in the frame.
+>
+> Configure it in `data/planning_workflow_config.json`, or pass
+> `--crop-time-video-top` when running `data/planning_workflow.py`.
+
+> [!IMPORTANT]
+> **Image-in-video matching (`image_in_video`)**
+>
+> If the input clip or candidate option images contain visible timestamp
+> overlays, set `crop_time_video_top` to `true` before generating VQA data. This
+> keeps the task focused on whether the image appears in the clip instead of
+> exposing timestamp clues.
+>
+> Configure it in `data/time_unders_workflow_config.json`, or pass
+> `--crop-time-video-top` when running `data/time_unders_workflow.py`.
+
 ## Image-in-Video QA
 
 Each `image_in_video` question asks which candidate image appeared in the input
@@ -159,6 +194,8 @@ Important fields in the generation configs:
 - `window_mode`: temporal window mode, one of `raw`, `transition`, or `legacy_pickplace`.
 - `image_in_video_question`: question text for image-in-video matching.
 - `image_in_video_view`: source view for image-in-video clips and option images; currently use `left_eye`.
+- `crop_time_video_top`: set to `true` when source videos contain visible top timestamp overlays, especially for `left_right`, `step_order`, and `image_in_video`.
+- `time_crop_top_fraction`: fraction of the top frame area to remove when `crop_time_video_top` is enabled.
 
 The current configs can use external LLMs for distractor generation through the API keys configured in `data/*_config.json`.
 
