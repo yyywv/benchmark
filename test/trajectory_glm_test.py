@@ -346,15 +346,28 @@ def coerce_point_list(value: Any, dim: int) -> list[list[float]]:
     return points
 
 
-def parse_model_answer(text: str, dim: int) -> dict[str, Any]:
+def parse_first_json_object(text: str) -> dict[str, Any]:
     cleaned = strip_json_fence(text)
+    decoder = json.JSONDecoder()
     try:
         data = json.loads(cleaned)
+        return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        data = json.loads(match.group(0)) if match else {}
-    if not isinstance(data, dict):
-        data = {}
+        pass
+    for start, char in enumerate(cleaned):
+        if char != "{":
+            continue
+        try:
+            data, _ = decoder.raw_decode(cleaned[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def parse_model_answer(text: str, dim: int) -> dict[str, Any]:
+    data = parse_first_json_object(text)
     left = (
         data.get("left_gripper")
         or data.get("left")
