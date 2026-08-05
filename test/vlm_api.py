@@ -16,6 +16,8 @@ import base64
 import json
 import mimetypes
 import os
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -136,7 +138,7 @@ def runtime_config(
     model = cli_model or model_from_env or provider.get("model") or default_model
     api_url_env = provider.get("api_url_env")
     api_url_from_env = os.getenv(str(api_url_env)) if api_url_env else None
-    local_provider = provider_type in {"local_qwen", "local_transformers_vlm", "local_internvl"}
+    local_provider = provider_type in {"local_qwen", "local_transformers_vlm", "local_internvl", "local_cosmos_framework"}
     api_url = str(api_url_from_env or provider.get("api_url") or ("" if local_provider else default_api_url))
     temperature = cli_temperature if cli_temperature is not None else provider.get("temperature", defaults.get("temperature", 0.0))
     thinking = cli_thinking if cli_thinking is not None else provider.get("thinking", defaults.get("thinking", "disabled"))
@@ -170,6 +172,10 @@ def runtime_config(
         "max_video_tiles": int(provider.get("max_video_tiles", defaults.get("max_video_tiles", 1))),
         "use_flash_attn": bool(provider.get("use_flash_attn", defaults.get("use_flash_attn", True))),
         "cuda_visible_devices": str(provider.get("cuda_visible_devices", defaults.get("cuda_visible_devices", ""))),
+        "cosmos_parallelism_preset": str(provider.get("parallelism_preset", defaults.get("parallelism_preset", "latency"))),
+        "cosmos_no_guardrails": bool(provider.get("no_guardrails", defaults.get("no_guardrails", True))),
+        "cosmos_output_dir": str(provider.get("cosmos_output_dir", defaults.get("cosmos_output_dir", ""))),
+        "cosmos_multi_vision_field": str(provider.get("multi_vision_field", defaults.get("multi_vision_field", "vision_paths"))),
         "system_prompt": str(
             provider.get(
                 "system_prompt",
@@ -428,6 +434,137 @@ def request_local_transformers_vlm(runtime: dict[str, Any], parts: list[dict[str
         "choices": [{"message": {"content": output_text}}],
         "model": runtime["model"],
         "local_weights": runtime["model"],
+    }
+
+
+def cosmos_part_prompt_and_media(parts: list[dict[str, Any]]) -> tuple[str, list[dict[str, str]]]:
+    prompt_chunks: list[str] = []
+    media: list[dict[str, str]] = []
+    pending_label = ""
+    for part in parts:
+        part_type = part.get("type")
+        if part_type == "text":
+            text = str(part.get("text", "")).strip()
+            if text:
+                prompt_chunks.append(text)
+                pending_label = text
+        elif part_type in {"image", "video"}:
+            media.append(
+                {
+                    "type": str(part_type),
+                    "path": str(part["path"]),
+                    "label": pending_label,
+                }
+            )
+            pending_label = ""
+        else:
+            raise ValueError(f"Unsupported content part type for local_cosmos_framework: {part_type}")
+    return "\n\n".join(prompt_chunks), media
+
+
+def make_cosmos_contact_sheet(images: list[dict[str, str]], output_path: Path) -> None:
+    from PIL import Image, ImageDraw, ImageFont
+
+    if not images:
+        raise ValueError("Cannot build Cosmos contact sheet with no images")
+    thumb_w, thumb_h = 384, 288
+    label_h = 52
+    columns = min(3, len(images))
+    rows = (len(images) + columns - 1) // columns
+    sheet = Image.new("RGB", (columns * thumb_w, rows * (thumb_h + label_h)), "white")
+    draw = ImageDraw.Draw(sheet)
+    font = ImageFont.load_default()
+    for index, item in enumerate(images):
+        source = Image.open(item["path"]).convert("RGB")
+        source.thumbnail((thumb_w, thumb_h), Image.Resampling.LANCZOS)
+        x = (index % columns) * thumb_w
+        y = (index // columns) * (thumb_h + label_h)
+        image_x = x + (thumb_w - source.width) // 2
+        image_y = y + label_h + (thumb_h - source.height) // 2
+        label = item.get("label") or f"Image {index + 1}"
+        draw.text((x + 8, y + 8), label[:90], fill=(0, 0, 0), font=font)
+        sheet.paste(source, (image_x, image_y))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path)
+
+
+def cosmos_vision_payload(media: list[dict[str, str]], work_dir: Path, multi_field: str) -> dict[str, Any]:
+    if not media:
+        return {}
+    videos = [item for item in media if item["type"] == "video"]
+    images = [item for item in media if item["type"] == "image"]
+    paths = [item["path"] for item in videos + images]
+    if len(paths) > 1:
+        return {multi_field: paths}
+    if videos:
+        return {"vision_path": videos[0]["path"]}
+    if len(images) == 1:
+        return {"vision_path": images[0]["path"]}
+    output_path = work_dir / "cosmos_contact_sheet.jpg"
+    make_cosmos_contact_sheet(images, output_path)
+    return {"vision_path": str(output_path)}
+
+
+def request_local_cosmos_framework(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[str, Any]:
+    prompt, media = cosmos_part_prompt_and_media(parts)
+    if runtime.get("system_prompt"):
+        prompt = f"{runtime['system_prompt']}\n\n{prompt}".strip()
+
+    output_root = Path(runtime.get("cosmos_output_dir") or tempfile.mkdtemp(prefix="cosmos_framework_out_"))
+    work_dir = output_root / f"request_{int(time.time() * 1000)}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    sample_path = work_dir / "sample.json"
+    sample: dict[str, Any] = {
+        "model_mode": "reasoner",
+        "prompt": prompt,
+    }
+    sample.update(cosmos_vision_payload(media, work_dir, runtime["cosmos_multi_vision_field"]))
+    sample_path.write_text(json.dumps(sample, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    cmd = [
+        "python",
+        "-m",
+        "cosmos_framework.scripts.inference",
+        "--parallelism-preset",
+        runtime["cosmos_parallelism_preset"],
+        "-i",
+        str(sample_path),
+        "-o",
+        str(work_dir / "outputs"),
+        "--checkpoint-path",
+        runtime["model"],
+        "--seed",
+        "0",
+    ]
+    if runtime.get("cosmos_no_guardrails", True):
+        cmd.append("--no-guardrails")
+
+    env = os.environ.copy()
+    if runtime.get("cuda_visible_devices"):
+        env["CUDA_VISIBLE_DEVICES"] = runtime["cuda_visible_devices"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=runtime["timeout"], env=env)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "cosmos-framework inference failed\n"
+            f"cmd={' '.join(cmd)}\n"
+            f"stdout={result.stdout[-2000:]}\n"
+            f"stderr={result.stderr[-2000:]}"
+        )
+
+    outputs = sorted((work_dir / "outputs").rglob("reasoner_text.txt"))
+    if not outputs:
+        sample_outputs = sorted((work_dir / "outputs").rglob("sample_outputs.json"))
+        raise RuntimeError(
+            "cosmos-framework inference finished but reasoner_text.txt was not found. "
+            f"sample_outputs={sample_outputs}"
+        )
+    output_text = outputs[0].read_text(encoding="utf-8").strip()
+    return {
+        "choices": [{"message": {"content": output_text}}],
+        "model": runtime["model"],
+        "local_weights": runtime["model"],
+        "cosmos_sample": str(sample_path),
+        "cosmos_output": str(outputs[0]),
     }
 
 
@@ -741,6 +878,8 @@ def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[s
         return request_local_transformers_vlm(runtime, parts)
     if provider_type == "local_internvl":
         return request_local_internvl(runtime, parts)
+    if provider_type == "local_cosmos_framework":
+        return request_local_cosmos_framework(runtime, parts)
     if provider_type == "gemini":
         api_url = runtime["api_url"].format(model=runtime["model"])
         separator = "&" if "?" in api_url else "?"
