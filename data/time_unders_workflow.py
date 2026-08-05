@@ -386,8 +386,9 @@ def build_time_items(
     time_crop_top_fraction: float,
     overwrite_time_crop: bool,
     no_media: bool,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     items: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
     video_cache: dict[tuple[str, str], Path] = {}
     cropped_video_cache: dict[tuple[str, str], Path] = {}
     joined_video_cache: dict[str, dict[str, Any]] = {}
@@ -409,52 +410,64 @@ def build_time_items(
             "start": start,
             "end": end,
         }
-        if multi_view_video_root is not None and not no_media:
-            video_paths = multiview_video_paths_for(video_id, multi_view_video_root, views, video_exts, video_cache)
-            original_video_paths = video_paths
-            if crop_time_video_top:
-                video_paths = maybe_crop_time_videos(
-                    video_id=video_id,
-                    video_paths=original_video_paths,
-                    output_dir=time_cropped_video_dir,
-                    top_fraction=time_crop_top_fraction,
-                    overwrite=overwrite_time_crop,
-                    cache=cropped_video_cache,
+        try:
+            if multi_view_video_root is not None and not no_media:
+                video_paths = multiview_video_paths_for(video_id, multi_view_video_root, views, video_exts, video_cache)
+                original_video_paths = video_paths
+                if crop_time_video_top:
+                    video_paths = maybe_crop_time_videos(
+                        video_id=video_id,
+                        video_paths=original_video_paths,
+                        output_dir=time_cropped_video_dir,
+                        top_fraction=time_crop_top_fraction,
+                        overwrite=overwrite_time_crop,
+                        cache=cropped_video_cache,
+                    )
+                joined_video = joined_video_cache.get(video_id)
+                if joined_video is None:
+                    joined_video = join_multiview_video_paths(
+                        video_id=video_id,
+                        item_id=video_id,
+                        start=0.0,
+                        end=None,
+                        output_dir=time_cropped_video_dir.parent / "time_joined_videos",
+                        video_paths=video_paths,
+                        output_suffix="time_joined_views",
+                    )
+                    joined_video_cache[video_id] = joined_video
+                input_data.update(
+                    {
+                        "video_path": joined_video["video_path"],
+                        "video_paths": [joined_video["video_path"]],
+                        "joined_video": joined_video,
+                        "source_video_paths": joined_video["source_video_paths"],
+                        "view_order": joined_video["view_order"],
+                        "videos": {
+                            view_name: {
+                                "view": view_name,
+                                "video_path": str(path),
+                                "original_video_path": str(original_video_paths[view_name]),
+                                "crop_top_applied": crop_time_video_top,
+                                "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
+                            }
+                            for view_name, path in video_paths.items()
+                        },
+                        "original_video_paths": [str(path) for path in original_video_paths.values()],
+                        "crop_top_applied": crop_time_video_top,
+                        "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
+                    }
                 )
-            joined_video = joined_video_cache.get(video_id)
-            if joined_video is None:
-                joined_video = join_multiview_video_paths(
-                    video_id=video_id,
-                    item_id=video_id,
-                    start=0.0,
-                    end=None,
-                    output_dir=time_cropped_video_dir.parent / "time_joined_videos",
-                    video_paths=video_paths,
-                    output_suffix="time_joined_views",
-                )
-                joined_video_cache[video_id] = joined_video
-            input_data.update(
+        except FileNotFoundError as exc:
+            skipped.append(
                 {
-                    "video_path": joined_video["video_path"],
-                    "video_paths": [joined_video["video_path"]],
-                    "joined_video": joined_video,
-                    "source_video_paths": joined_video["source_video_paths"],
-                    "view_order": joined_video["view_order"],
-                    "videos": {
-                        view_name: {
-                            "view": view_name,
-                            "video_path": str(path),
-                            "original_video_path": str(original_video_paths[view_name]),
-                            "crop_top_applied": crop_time_video_top,
-                            "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
-                        }
-                        for view_name, path in video_paths.items()
-                    },
-                    "original_video_paths": [str(path) for path in original_video_paths.values()],
-                    "crop_top_applied": crop_time_video_top,
-                    "crop_top_fraction": time_crop_top_fraction if crop_time_video_top else None,
+                    "id": str(segment["id"]),
+                    "video_id": str(video_id),
+                    "source_path": row["source_path"],
+                    "reason": str(exc),
                 }
             )
+            print(f"[skip missing video] {video_id}: {exc}", flush=True)
+            continue
         items.append(
             {
                 "id": str(segment["id"]),
@@ -484,7 +497,7 @@ def build_time_items(
                 "metadata": segment_metadata(segment, start, end, window_type),
             }
         )
-    return items
+    return items, skipped
 
 
 def deterministic_option_texts(item_id: str, texts: list[str]) -> list[str]:
@@ -2200,7 +2213,7 @@ def main() -> int:
     views = parse_view_specs(args.views)
     time_cropped_video_dir = args.time_cropped_video_dir or (args.output_dir / "time_video_crop_top")
     segment_rows = load_segments(args.data_dir, args.file_limit)
-    time_items = build_time_items(
+    time_items, missing_media_skipped = build_time_items(
         segment_rows,
         question_template=args.time_question,
         window_mode=args.window_mode,
@@ -2215,7 +2228,7 @@ def main() -> int:
         time_cropped_video_dir=time_cropped_video_dir,
         time_crop_top_fraction=args.time_crop_top_fraction,
         overwrite_time_crop=args.overwrite_time_crop,
-        no_media=args.no_media or "time" not in tasks,
+        no_media=args.no_media,
     )
     category_labels = load_category_labels(args.category_label_path, time_items)
     task_name = task_name_from_category_label_path(args.category_label_path)
@@ -2265,6 +2278,8 @@ def main() -> int:
         "time_cropped_video_dir": str(time_cropped_video_dir) if args.crop_time_video_top else None,
         "window_mode": args.window_mode,
         "num_source_segments": len(segment_rows),
+        "num_missing_media_skipped": len(missing_media_skipped),
+        "missing_media_skipped": missing_media_skipped,
     }
 
     if "time" in tasks:
@@ -2378,6 +2393,8 @@ def main() -> int:
         )
 
     print(f"Source segments: {len(segment_rows)}")
+    if missing_media_skipped:
+        print(f"Skipped missing media: {len(missing_media_skipped)}")
     print(f"Output dir: {args.output_dir}")
     print(f"Generated tasks: {', '.join(sorted(tasks))}")
     return 0
