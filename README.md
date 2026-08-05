@@ -33,6 +33,7 @@ The generated JSON files are evaluated by scripts in `test/`, with model calls u
 
 ## Update Log
 
+- 2026-08-05 16:33 +08:00: Data generation now skips segment rows whose required videos are missing in `data/time_unders_workflow.py` and `data/planning_workflow.py`; outputs include `num_missing_media_skipped` and `missing_media_skipped` for traceability.
 - 2026-08-05 12:54 +08:00: `local_cosmos3_edge_2b` now loads local Hugging Face Cosmos3-Edge weights through Transformers instead of the cosmos-framework inference subprocess.
 - 2026-08-04 19:27 +08:00: `image_in_video` generation now honors `--crop-time-video-top`; both the generated clip and option images are extracted from the top-cropped source video when enabled.
 
@@ -144,6 +145,11 @@ python data/time_unders_workflow.py \
 ```
 
 `--no-media` generates JSON only and skips frame or video extraction.
+
+If a segment JSON points to a missing required video, the generation scripts skip
+that segment instead of stopping the whole run. The generated task JSON records
+the skipped rows in `missing_media_skipped`, with a count in
+`num_missing_media_skipped`.
 
 The `image_in_video` task requires media extraction because each sample contains
 one left-eye video clip plus candidate option images. If you only want to build
