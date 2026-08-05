@@ -323,6 +323,11 @@ def coerce_point_list(value: Any, dim: int) -> list[list[float]]:
                 break
     if not isinstance(value, list):
         return []
+    if len(value) >= dim and all(isinstance(value[index], (int, float)) for index in range(dim)):
+        try:
+            return [[float(value[index]) for index in range(dim)]]
+        except (TypeError, ValueError):
+            return []
     points: list[list[float]] = []
     for row in value:
         if isinstance(row, dict):
