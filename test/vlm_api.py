@@ -449,10 +449,11 @@ def cosmos_part_prompt_and_media(parts: list[dict[str, Any]]) -> tuple[str, list
                 prompt_chunks.append(text)
                 pending_label = text
         elif part_type in {"image", "video"}:
+            path = Path(str(part["path"])).expanduser()
             media.append(
                 {
                     "type": str(part_type),
-                    "path": str(part["path"]),
+                    "path": str(path if path.is_absolute() else path.resolve()),
                     "label": pending_label,
                 }
             )
