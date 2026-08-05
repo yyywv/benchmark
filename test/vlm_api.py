@@ -7,6 +7,7 @@ Supported provider types:
   - gemini: Gemini generateContent REST API
   - local_qwen: local Qwen-VL weights loaded by transformers
   - local_transformers_vlm: local image-text-to-text weights loaded by transformers
+  - local_cosmos_transformers: local Cosmos3 Edge HF weights loaded by transformers
   - local_internvl: local InternVL weights loaded by transformers
 """
 
@@ -31,6 +32,7 @@ _LOCAL_QWEN_MODEL: Any | None = None
 _LOCAL_QWEN_PROCESSOR: Any | None = None
 _LOCAL_QWEN_MODEL_NAME: str | None = None
 _LOCAL_TRANSFORMERS_VLM_MODELS: dict[str, tuple[Any, Any]] = {}
+_LOCAL_COSMOS_TRANSFORMERS_MODELS: dict[str, tuple[Any, Any]] = {}
 _LOCAL_INTERNVL_MODEL: Any | None = None
 _LOCAL_INTERNVL_TOKENIZER: Any | None = None
 _LOCAL_INTERNVL_MODEL_NAME: str | None = None
@@ -138,7 +140,13 @@ def runtime_config(
     model = cli_model or model_from_env or provider.get("model") or default_model
     api_url_env = provider.get("api_url_env")
     api_url_from_env = os.getenv(str(api_url_env)) if api_url_env else None
-    local_provider = provider_type in {"local_qwen", "local_transformers_vlm", "local_internvl", "local_cosmos_framework"}
+    local_provider = provider_type in {
+        "local_qwen",
+        "local_transformers_vlm",
+        "local_cosmos_transformers",
+        "local_internvl",
+        "local_cosmos_framework",
+    }
     api_url = str(api_url_from_env or provider.get("api_url") or ("" if local_provider else default_api_url))
     temperature = cli_temperature if cli_temperature is not None else provider.get("temperature", defaults.get("temperature", 0.0))
     thinking = cli_thinking if cli_thinking is not None else provider.get("thinking", defaults.get("thinking", "disabled"))
@@ -429,6 +437,88 @@ def request_local_transformers_vlm(runtime: dict[str, Any], parts: list[dict[str
     with torch.no_grad():
         output_ids = local_model.generate(**inputs, **generate_kwargs)
     new_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+    output_text = processor.batch_decode(new_ids, skip_special_tokens=True)[0].strip()
+    return {
+        "choices": [{"message": {"content": output_text}}],
+        "model": runtime["model"],
+        "local_weights": runtime["model"],
+    }
+
+
+def local_cosmos_content(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = []
+    for part in parts:
+        part_type = part.get("type")
+        if part_type == "text":
+            content.append({"type": "text", "text": str(part.get("text", ""))})
+        elif part_type in {"image", "video"}:
+            path = Path(str(part["path"])).expanduser()
+            resolved = path if path.is_absolute() else path.resolve()
+            content.append({"type": str(part_type), "url": str(resolved)})
+        else:
+            raise ValueError(f"Unsupported content part type for local_cosmos_transformers: {part_type}")
+    return content
+
+
+def load_local_cosmos_transformers(model_name: str) -> tuple[Any, Any]:
+    cached = _LOCAL_COSMOS_TRANSFORMERS_MODELS.get(model_name)
+    if cached is not None:
+        return cached
+
+    import torch
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    model_path = Path(model_name).expanduser()
+    resolved_model = str(model_path) if model_path.exists() else model_name
+    print(f"Loading local Cosmos3 Edge transformers model: {resolved_model}", flush=True)
+    processor = AutoProcessor.from_pretrained(resolved_model, trust_remote_code=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        resolved_model,
+        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+        trust_remote_code=True,
+    )
+    model.eval()
+    _LOCAL_COSMOS_TRANSFORMERS_MODELS[model_name] = (model, processor)
+    return model, processor
+
+
+def request_local_cosmos_transformers(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[str, Any]:
+    import torch
+
+    local_model, processor = load_local_cosmos_transformers(runtime["model"])
+    messages = [
+        {"role": "system", "content": runtime["system_prompt"]},
+        {"role": "user", "content": local_cosmos_content(parts)},
+    ]
+
+    inputs = processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
+    device = getattr(local_model, "device", None) or next(local_model.parameters()).device
+    inputs = inputs.to(device)
+
+    do_sample = runtime["temperature"] > 0
+    generate_kwargs: dict[str, Any] = {
+        "max_new_tokens": runtime["max_new_tokens"],
+        "do_sample": do_sample,
+    }
+    if do_sample:
+        generate_kwargs["temperature"] = runtime["temperature"]
+    eos_token_id = getattr(getattr(processor, "tokenizer", None), "eos_token_id", None)
+    if eos_token_id is not None:
+        generate_kwargs["pad_token_id"] = eos_token_id
+
+    with torch.no_grad():
+        output_ids = local_model.generate(**inputs, **generate_kwargs)
+    new_ids = [
+        output[len(input_ids) :]
+        for input_ids, output in zip(inputs["input_ids"], output_ids)
+    ]
     output_text = processor.batch_decode(new_ids, skip_special_tokens=True)[0].strip()
     return {
         "choices": [{"message": {"content": output_text}}],
@@ -877,6 +967,8 @@ def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[s
         return request_local_qwen(runtime, parts)
     if provider_type == "local_transformers_vlm":
         return request_local_transformers_vlm(runtime, parts)
+    if provider_type == "local_cosmos_transformers":
+        return request_local_cosmos_transformers(runtime, parts)
     if provider_type == "local_internvl":
         return request_local_internvl(runtime, parts)
     if provider_type == "local_cosmos_framework":

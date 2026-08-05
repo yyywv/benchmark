@@ -13,7 +13,7 @@
       "local_qwen": "Locally deployed Qwen-VL, loaded via transformers with local weights, no API key needed.",
       "local_rynnbrain_2b": "Local RynnBrain-2B weights, loaded directly by transformers; use RYNNBRAIN_2B_MODEL_PATH or --model.",
       "local_rynnbrain11_2b": "Local RynnBrain1.1-2B weights, loaded directly by transformers; use RYNNBRAIN11_2B_MODEL_PATH or --model.",
-      "local_cosmos3_edge_2b": "Local Cosmos 3-edge 2B weights, loaded through cosmos-framework reasoner inference; use COSMOS3_EDGE_MODEL_PATH or --model.",
+      "local_cosmos3_edge_2b": "Local Cosmos 3-edge 2B Hugging Face weights, loaded directly by transformers; use COSMOS3_EDGE_MODEL_PATH or --model.",
       "local_cosmos_reason_2b": "Local Cosmos-reason 2B weights, loaded directly by transformers; use COSMOS_REASON_2B_MODEL_PATH or --model.",
       "local_sensenova_si_1_1_internvl32b": "Local SenseNova-SI-1.1 InternVL32B weights, loaded directly with the InternVL adapter; use SENSENOVA_SI_1_1_INTERNVL32B_MODEL_PATH or --model."
     },
@@ -138,14 +138,12 @@
       "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_cosmos3_edge_2b": {
-      "type": "local_cosmos_framework",
-      "model": "/ssd/Cosmos3-Edge",
+      "type": "local_cosmos_transformers",
+      "model": "/ssd/model/Cosmos3-Edge",
       "model_env": "COSMOS3_EDGE_MODEL_PATH",
       "temperature": 0.0,
       "timeout": 1800,
       "max_new_tokens": 1024,
-      "parallelism_preset": "latency",
-      "no_guardrails": true,
       "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     },
     "local_cosmos_reason_2b": {

@@ -33,6 +33,7 @@ The generated JSON files are evaluated by scripts in `test/`, with model calls u
 
 ## Update Log
 
+- 2026-08-05 12:54 +08:00: `local_cosmos3_edge_2b` now loads local Hugging Face Cosmos3-Edge weights through Transformers instead of the cosmos-framework inference subprocess.
 - 2026-08-04 19:27 +08:00: `image_in_video` generation now honors `--crop-time-video-top`; both the generated clip and option images are extracted from the top-cropped source video when enabled.
 
 ## Repository Structure
