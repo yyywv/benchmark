@@ -33,6 +33,7 @@ The generated JSON files are evaluated by scripts in `test/`, with model calls u
 
 ## Update Log
 
+- 2026-08-06 22:00 +08:00: Documented how Time EQA generation selects single-view versus multi-view video inputs through `multi_view_video_root` and `views`.
 - 2026-08-05 16:33 +08:00: Data generation now skips segment rows whose required videos are missing in `data/time_unders_workflow.py` and `data/planning_workflow.py`; outputs include `num_missing_media_skipped` and `missing_media_skipped` for traceability.
 - 2026-08-05 12:54 +08:00: `local_cosmos3_edge_2b` now loads local Hugging Face Cosmos3-Edge weights through Transformers instead of the cosmos-framework inference subprocess.
 - 2026-08-04 19:27 +08:00: `image_in_video` generation now honors `--crop-time-video-top`; both the generated clip and option images are extracted from the top-cropped source video when enabled.
@@ -150,6 +151,51 @@ If a segment JSON points to a missing required video, the generation scripts ski
 that segment instead of stopping the whole run. The generated task JSON records
 the skipped rows in `missing_media_skipped`, with a count in
 `num_missing_media_skipped`.
+
+### Time EQA Single-View and Multi-View Video Selection
+
+Time EQA does not use a separate `view_mode` flag. The generator chooses the
+video input mode from `multi_view_video_root` and `views`:
+
+- If `multi_view_video_root` is non-empty, Time EQA reads the per-view videos
+  listed in `views`, joins them into one synchronized multi-view video, and
+  writes that joined video to `input.video_path` and `input.video_paths`.
+- If `multi_view_video_root` is an empty string, Time EQA falls back to
+  `video_dir` and uses the single-view video matched by `video_id`.
+- If you want a single camera from the multi-view directory layout, keep
+  `multi_view_video_root` set and include only that camera in `views`.
+
+Use the existing multi-view layout:
+
+```json
+{
+  "multi_view_video_root": "/path/to/videos",
+  "views": {
+    "left_eye": "observation.images.left_eye",
+    "left_wrist": "observation.images.left_wrist",
+    "right_wrist": "observation.images.right_wrist"
+  }
+}
+```
+
+Force single-view media from `video_dir`:
+
+```bash
+python data/time_unders_workflow.py \
+  --config data/time_unders_workflow_config.json \
+  --multi-view-video-root ""
+```
+
+Use only one view from the multi-view root:
+
+```json
+{
+  "multi_view_video_root": "/path/to/videos",
+  "views": {
+    "left_eye": "observation.images.left_eye"
+  }
+}
+```
 
 The `image_in_video` task requires media extraction because each sample contains
 one left-eye video clip plus candidate option images. If you only want to build
