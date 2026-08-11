@@ -125,9 +125,7 @@ def normalize_objects(objects: list[Any] | str | None) -> list[str]:
 
 
 def build_prompt(question: str) -> str:
-    return f"""You are controlling a robot arm in a block-stacking task.
-
-Goal: stack all cubes together.
+    return f"""You are observing a robot manipulation task and need to predict the next action.
 
 Look at the current video clip and choose the next action the robot should take.
 Choose exactly one option from the provided option letters. Do not invent a new action.
