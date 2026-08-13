@@ -255,6 +255,9 @@ def runtime_config(
         "video_sample_fps": frames["video_sample_fps"],
         "frames": frames,
         "device_map": provider.get("device_map", defaults.get("device_map")),
+        # BC-11：请求体预算。默认 0 = 不做任何媒体处理，超限就让它 413 并如实记录。
+        "max_request_bytes": int(provider.get("max_request_bytes", defaults.get("max_request_bytes", 0))),
+        "media_cache_dir": str(provider.get("media_cache_dir", defaults.get("media_cache_dir", ""))),
         "max_image_tiles": int(provider.get("max_image_tiles", defaults.get("max_image_tiles", 12))),
         "max_video_tiles": int(provider.get("max_video_tiles", defaults.get("max_video_tiles", 1))),
         "use_flash_attn": bool(provider.get("use_flash_attn", defaults.get("use_flash_attn", True))),
@@ -1204,10 +1207,22 @@ def call_vlm(
     """
     provider_type = runtime["type"]
     runtime["_frames_used"] = {}
+
+    # BC-11：远程 provider 有请求体上限，超了会 413。只有配置里给了预算才处理。
+    media_transforms: list[dict[str, Any]] = []
+    budget = int(runtime.get("max_request_bytes") or 0)
+    if budget > 0 and provider_type in {"openai_compatible", "gemini", "glm", "qwen"}:
+        from .media_prep import prepare_parts
+
+        cache_dir = Path(runtime.get("media_cache_dir") or ".media_cache")
+        parts, media_transforms = prepare_parts(parts, budget, cache_dir)
+
     raw = request_json(runtime, parts)
     text = response_text(raw, provider_type)
 
     if meta is not None:
+        if media_transforms:
+            meta["media_transforms"] = media_transforms
         frames = runtime.pop("_frames_used", {}) or {}
         if frames:
             meta["frames_used"] = frames

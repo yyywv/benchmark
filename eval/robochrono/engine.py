@@ -99,6 +99,7 @@ def run(
             ctx = CallContext(
                 frames_used=meta.get("frames_used", {}),
                 usage=meta.get("usage", {}),
+                media_transforms=meta.get("media_transforms", []),
             )
             rows = task.rows(unit, text, ctx)
             consecutive_failures = 0

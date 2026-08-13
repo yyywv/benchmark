@@ -11,7 +11,12 @@
     "         max_new_tokens=1024。默认关闭 —— 关闭时与冻结脚本逐字节一致。",
     "",
     "注意：frames 的取值尚未定案，见 eval/docs/frame_sampling_investigation.md。",
-    "下面 mode: uniform / value: 8 只是为了让链路能跑，不是评测配置。"
+    "下面 mode: uniform / value: 8 只是为了让链路能跑，不是评测配置。",
+    "",
+    "  BC-11  max_request_bytes：远程端点的请求体上限。实测该 MaaS 端点",
+    "         base64 10.32 MB 通过、10.99 MB 返回 413，故取 10,000,000 保守值。",
+    "         超预算的视频会被降分辨率重编码，变换记录写进结果行。",
+    "         设为 0 或删掉该字段即完全不处理媒体。"
   ],
   "unify_generation": false,
   "strict_frames": false,
@@ -46,7 +51,9 @@
       "api_key_env": "DASHSCOPE_API_KEY",
       "model": "qwen3.8-max",
       "media_url_format": "data_url",
-      "api_url_env": "DASHSCOPE_API_URL"
+      "api_url_env": "DASHSCOPE_API_URL",
+      "max_request_bytes": 10000000,
+      "media_cache_dir": "eval/results/.media_cache"
     },
     "replay": {
       "type": "replay",

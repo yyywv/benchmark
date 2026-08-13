@@ -263,14 +263,16 @@ InternVL3.5-30B-A3B 更是一档都跑不了。需要补一个决定：
 
 拿到 key 之后实测远程链路，两个发现改变了之前的结论。
 
-### 发现一：请求体大小上限，视频任务会被挡下
+### 发现一：请求体大小上限，视频任务会被挡下（已解决，见 BC-11）
 
-base64 内联媒体会撞上服务端的请求体上限：
+base64 内联媒体会撞上服务端的请求体上限。二分探测的精确边界：
 
 ```
-base64  4.19 MB  →  成功
-base64 12.92 MB  →  HTTP 413 RequestTooLarge
+base64 10.32 MB  →  HTTP 200
+base64 10.99 MB  →  HTTP 413 RequestTooLarge
 ```
+
+即约 **10 MiB** 的请求体上限（含 prompt 文本与 JSON 结构）。
 
 各任务的媒体体积（base64 后约为原始的 4/3）：
 
@@ -286,11 +288,39 @@ base64 12.92 MB  →  HTTP 413 RequestTooLarge
 也就是说 **5 个 API 模型的 Time EQA 用当前方式根本跑不了**，
 understanding 与 planning 也会丢失一部分长切片。这不是配置问题，是硬约束。
 
-可能的出路（都需要决策，均会影响可比性）：
+**已实现的解法（BC-11）：** 超预算时对视频降分辨率重编码，压回预算内。
+详见 `eval/robochrono/media_prep.py`。默认不启用，只有 provider 配置里给了
+`max_request_bytes` 才生效；每次变换都写进结果行的 `media_transforms`，可审计。
 
-1. 为 API 提交单独重编码/降分辨率 —— 改变模型看到的内容
-2. 改用服务端的文件上传接口传 URL，而非内联 base64 —— 需要确认各家是否支持
-3. API 模型跳过视频任务 —— 榜单缺格
+**关键验证：这个压缩不改变模型实际获得的视觉预算。**
+
+取一条本来就在预算内的 clip，压缩前后各发一次，比较服务端报告的 `video_tokens`：
+
+```
+原始    4.19 MB   video_tokens = 2902   «robot is picking up the red cube and placing it on top of…»
+压缩后  0.86 MB   video_tokens = 2902   «robot is picking up the red block and stacking it on top of…»
+```
+
+**token 数完全相同。** 说明服务端本来就会把画面降到自己的目标分辨率，
+而我们 `scale=0.75` 的输出仍在那个目标之上，所以模型看到的信息量没有变化。
+两次回答语义一致，措辞差异属正常波动。
+
+这让 BC-11 的风险远低于预期 —— 它改的是传输体积，不是模型输入。
+
+**效果：Time EQA 从「完全跑不了」变成可跑。**
+
+```
+qwen3.8-max × stack_cubes × time，3 个 episode / 18 题
+  file-000  9.97 MB → 1.75 MB (scale 0.75)   video_tokens 17,668
+  file-001 11.03 MB → 1.99 MB (scale 0.75)   video_tokens 19,604
+  file-002  原样发送                          video_tokens 32,852
+  结果：18/18 作答，0 错误，mean_tIoU = 0.716
+```
+
+对比同一份数据上本地 InternVL 用 8 帧（2,048 token）得到的 **tIoU = 0.0** ——
+这是抽帧预算影响 Time EQA 的最直接实证：**视觉预算差一个数量级，
+成绩从 0 到 0.72。** 再次印证第五、六节的结论：Time EQA 目前测的
+在很大程度上是各 adapter 的默认视觉预算，而不是模型的时间推理能力。
 
 ### 发现二：服务端直接返回视觉 token 数，闭源模型不再是黑盒
 

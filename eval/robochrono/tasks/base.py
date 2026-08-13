@@ -36,6 +36,8 @@ class CallContext:
 
     frames_used: dict[str, int] = field(default_factory=dict)
     usage: dict[str, Any] = field(default_factory=dict)
+    # BC-11：为满足请求体预算而对媒体做的变换。必须落到结果里，否则无从审计。
+    media_transforms: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Task(Protocol):
@@ -114,6 +116,8 @@ def base_row(item: dict[str, Any], prompt: str, text: str | None, ctx: CallConte
             row["frames_used"] = dict(ctx.frames_used)
         if ctx.usage:
             row["usage"] = dict(ctx.usage)
+        if ctx.media_transforms:
+            row["media_transforms"] = list(ctx.media_transforms)
     return row
 
 
