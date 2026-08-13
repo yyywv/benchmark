@@ -19,12 +19,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import engine, tasks
+from . import engine, matrix, report, tasks
 from .store import ResultStore
 from .tasks.base import load_items
 from .vlm_api import runtime_config
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs/providers.json"
+DEFAULT_PLAN = Path(__file__).resolve().parents[1] / "configs/plan.json"
 DEFAULT_DATASETS = Path(__file__).resolve().parents[1] / "datasets"
 DEFAULT_RESULTS = Path(__file__).resolve().parents[1] / "results"
 KEYS_FILE = Path.home() / ".config/robochrono/keys.env"
@@ -139,6 +140,69 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _parse_shard(text: str | None) -> tuple[int, int] | None:
+    if not text:
+        return None
+    try:
+        index, total = (int(x) for x in text.split("/", 1))
+    except ValueError as exc:
+        raise SystemExit(f"--shard must look like i/N, got {text!r}") from exc
+    if not 1 <= index <= total:
+        raise SystemExit(f"--shard index out of range: {text}")
+    return index, total
+
+
+def _expand(args: argparse.Namespace):
+    plan = matrix.load_plan(Path(args.plan))
+    return plan, matrix.expand(
+        plan,
+        Path(args.datasets_root),
+        shard=_parse_shard(getattr(args, "shard", None)),
+        only_kind=getattr(args, "only", None),
+    )
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    plan, (specs, skipped) = _expand(args)
+    print(f"{'#':>4}  {'model':<38} {'family':<14} {'run'}")
+    print("-" * 78)
+    for index, spec in enumerate(specs, 1):
+        print(f"{index:>4}  {spec.model.name:<38} {spec.family:<14} {spec.run}")
+    print("-" * 78)
+    print(f"共 {len(specs)} 个 run，跳过 {len(skipped)} 个")
+    for key, reason in skipped[:20]:
+        print(f"  [skip] {key}: {reason}")
+    if len(skipped) > 20:
+        print(f"  ... 另有 {len(skipped) - 20} 个")
+    return 0
+
+
+def cmd_estimate(args: argparse.Namespace) -> int:
+    plan, (specs, skipped) = _expand(args)
+    if not specs:
+        print("矩阵为空，无可估算内容")
+        return 1
+    by_model = report.estimate_matrix(specs, Path(args.datasets_root))
+    print(report.format_estimate(by_model, plan))
+    if skipped:
+        print(f"\n跳过 {len(skipped)} 个组合（QA 缺失或稀疏规则）")
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    rows: list[dict[str, Any]] = []
+    for directory in args.results_dirs or [Path(args.results_dir)]:
+        rows.extend(report.collect(Path(directory)))
+    if not rows:
+        print("没有找到任何 *.summary.json")
+        return 1
+    print(report.to_markdown(rows))
+    if args.csv:
+        report.to_csv(rows, Path(args.csv))
+        print(f"\nCSV 已写入 {args.csv}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="robochrono", description="RoboChrono 评测框架")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -168,6 +232,22 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--null-text-fix", action="store_true",
                             help="BC-10：text 为 null 的选项不参与文本匹配")
     run_parser.set_defaults(func=cmd_run)
+
+    for name, help_text, func in (
+        ("plan", "展开 (模型 × 任务族 × 任务) 矩阵", cmd_plan),
+        ("estimate", "估算调用量与媒体体积（不调模型）", cmd_estimate),
+    ):
+        sub_parser = sub.add_parser(name, help=help_text)
+        sub_parser.add_argument("--plan", default=str(DEFAULT_PLAN))
+        sub_parser.add_argument("--shard", default=None, help="形如 1/4，多机分工用")
+        sub_parser.add_argument("--only", choices=["local", "api"], default=None)
+        sub_parser.set_defaults(func=func)
+
+    report_parser = sub.add_parser("report", help="汇总结果成对比表")
+    report_parser.add_argument("results_dirs", nargs="*", type=Path,
+                               help="结果目录，可给多个（多机合并）")
+    report_parser.add_argument("--csv", default=None)
+    report_parser.set_defaults(func=cmd_report)
 
     args = parser.parse_args(argv)
     return args.func(args)
