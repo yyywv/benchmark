@@ -61,7 +61,6 @@
   "trajectory_left_xyz_indices": "0:3",
   "trajectory_right_xyz_indices": "7:10",
   "trajectory_decimals": 6,
-  "trajectory_fps": 20.0,
   "trajectory_use_base_to_camera_extrinsic": true,
   "trajectory_base_to_camera_xyz": [
     0.093353689,
