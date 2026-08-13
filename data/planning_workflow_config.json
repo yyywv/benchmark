@@ -1,14 +1,14 @@
 {
-  "data_dir": "/home/llm/yyywv/test_vlm/json_pickplace",
+  "data_dir": "/ssd/lzm/data/sort_blocks_lerobot2/videos/json",
   "video_dir": "/home/kewei/YWC/egodata/pickplace/video",
   "prejoined_video_dir": null,
-  "multi_view_video_root": "/home/llm/NAS/自采数据集/internal__lerobot_gripper_hand__2026_06_17/gripper/videos",
+  "multi_view_video_root": "/ssd/lzm/data/sort_blocks_lerobot2/videos",
   "views": {
-    "left_eye": "observation.images.left_eye",
-    "left_wrist": "observation.images.left_wrist",
-    "right_wrist": "observation.images.right_wrist"
+    "left_eye": "observation.images.top",
+    "left_wrist": "observation.images.wrist_L",
+    "right_wrist": "observation.images.wrist_R"
   },
-  "output_dir": "/home/llm/yyywv/test_vlm/workflow_outputs/planning",
+  "output_dir": "/ssd/yyywv/workflow_outputs/planning/sort_blocks",
   "video_exts": [
     ".mp4",
     ".webm",
@@ -23,7 +23,7 @@
     "trajectory"
   ],
   "file_limit": null,
-  "category_label_path": "/home/llm/yyywv/test_vlm/workflow/stack_all_cubes.txt",
+  "category_label_path": "/ssd/lzm/data/sort_blocks_lerobot2/videos/sort_blocks.txt",
   "num_options": 6,
   "nearby_distractors_per_question": 2,
   "generated_distractors_per_question": 2,
@@ -52,9 +52,6 @@
   "step_order_cell_width": 320,
   "step_order_jpeg_quality": 95,
   "step_order_seed": 42,
-  "trajectory_dataset_root": "/home/llm/NAS/lerobot_datasets-26-06-17-17-25-20/gripper",
-  "trajectory_views": "observation.images.left_eye,observation.images.right_eye,observation.images.left_wrist",
-  "trajectory_primary_view": "observation.images.left_eye",
   "trajectory_image_dir": null,
   "trajectory_internal": "gripper",
   "trajectory_num_keypoints": 10,
