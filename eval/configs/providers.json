@@ -1,0 +1,56 @@
+{
+  "_note": [
+    "评测用 provider 配置。相对 test/config_test.json 的改动：",
+    "  BC-07  SenseNova 更名为 SenseNova-SI-1.1-InternVL3-2B。",
+    "         原名 `...InternVL32B` 少了个连字符，读起来像 32B，",
+    "         实际是 InternVL3 架构的 2B（HF: sensenova/SenseNova-SI-1.1-InternVL3-2B，",
+    "         权重 4.18 GB）。照原名会找不到权重，或按 32B 白占 64 GB 显存。",
+    "  BC-09  抽帧改用互斥的 `frames` 声明，不再是 video_sample_fps 与",
+    "         num_segments 并存、后者被静默架空。",
+    "  BC-01  unify_generation 打开后统一 temperature=0 / thinking=disabled /",
+    "         max_new_tokens=1024。默认关闭 —— 关闭时与冻结脚本逐字节一致。",
+    "",
+    "注意：frames 的取值尚未定案，见 eval/docs/frame_sampling_investigation.md。",
+    "下面 mode: uniform / value: 8 只是为了让链路能跑，不是评测配置。"
+  ],
+
+  "unify_generation": false,
+  "strict_frames": false,
+
+  "defaults": {
+    "temperature": 0.0,
+    "thinking": "disabled",
+    "timeout": 300,
+    "max_retries": 3
+  },
+
+  "providers": {
+    "local_sensenova_si_1_1_internvl3_2b": {
+      "type": "local_internvl",
+      "model": "eval/models/SenseNova-SI-1_1-InternVL3-2B",
+      "model_env": "SENSENOVA_SI_1_1_INTERNVL3_2B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "frames": { "mode": "uniform", "value": 8 },
+      "max_image_tiles": 4,
+      "max_video_tiles": 1,
+      "use_flash_attn": false,
+      "device_map": { "": 0 },
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+    },
+
+    "qwen": {
+      "type": "openai_compatible",
+      "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "model": "qwen3.8-max",
+      "media_url_format": "data_url"
+    },
+
+    "replay": {
+      "type": "replay",
+      "model": "replay",
+      "require_api_key": false
+    }
+  }
+}
