@@ -11,6 +11,10 @@ __pycache__/
 datasets/
 workflow_outputs/
 results/
+models/
+
+# Backups left by the QA path-normalization pass (BC-08)
+*.orig
 
 # Common local/runtime artifacts
 .env
