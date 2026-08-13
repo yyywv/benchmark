@@ -35,9 +35,6 @@ import requests
 DEFAULT_DATA_DIR = Path("/home/llm/yyywv/test_vlm/json_pickplace")
 DEFAULT_VIDEO_DIR = Path("/home/llm/NAS/自采数据集/yyywv__pickplace__unversioned/video")
 DEFAULT_MULTI_VIEW_VIDEO_ROOT = Path("/home/llm/NAS/自采数据集/internal__lerobot_gripper_hand__2026_06_17/gripper/videos")
-DEFAULT_TRAJECTORY_DATASET_ROOT = Path("/home/llm/NAS/自采数据集/internal__lerobot_gripper_hand__2026_06_17/gripper")
-DEFAULT_TRAJECTORY_VIEWS = "observation.images.left_eye,observation.images.right_eye,observation.images.left_wrist"
-DEFAULT_TRAJECTORY_PRIMARY_VIEW = "observation.images.left_eye"
 DEFAULT_VIEWS = "left_eye=observation.images.left_eye,left_wrist=observation.images.left_wrist,right_wrist=observation.images.right_wrist"
 DEFAULT_OUTPUT_DIR = Path("/home/llm/yyywv/test_vlm/workflow_outputs")
 DEFAULT_TIME_CROPPED_VIDEO_DIR = Path("/home/llm/yyywv/test_vlm/workflow_outputs/planning/step_order")
@@ -171,9 +168,6 @@ def default_config() -> dict[str, Any]:
         "step_order_cell_width": 320,
         "step_order_jpeg_quality": 95,
         "step_order_seed": 42,
-        "trajectory_dataset_root": DEFAULT_TRAJECTORY_DATASET_ROOT,
-        "trajectory_views": DEFAULT_TRAJECTORY_VIEWS,
-        "trajectory_primary_view": DEFAULT_TRAJECTORY_PRIMARY_VIEW,
         "trajectory_image_dir": None,
         "trajectory_internal": "gripper",
         "trajectory_num_keypoints": 10,
@@ -1066,6 +1060,29 @@ def parse_view_specs(spec: str) -> dict[str, str]:
     if not views:
         raise ValueError("--views must contain at least one view")
     return views
+
+
+def derive_lerobot_dataset_root(multi_view_video_root: Path | None) -> Path:
+    if multi_view_video_root is None:
+        raise ValueError("Trajectory task requires --multi-view-video-root pointing to a LeRobot videos directory")
+    if multi_view_video_root.name == "videos":
+        return multi_view_video_root.parent
+    if (multi_view_video_root / "videos").is_dir():
+        return multi_view_video_root
+    raise ValueError(
+        "Cannot derive trajectory dataset root from --multi-view-video-root. "
+        "Expected a LeRobot path like <dataset_root>/videos."
+    )
+
+
+def derive_trajectory_views(views: dict[str, str]) -> str:
+    return ",".join(views.values())
+
+
+def derive_trajectory_primary_view(views: dict[str, str]) -> str:
+    if "left_eye" not in views:
+        raise ValueError("Trajectory task requires views to include left_eye")
+    return views["left_eye"]
 
 
 def multiview_video_path_for(
@@ -3650,13 +3667,18 @@ def main() -> int:
         )
 
     if "trajectory" in tasks:
+        trajectory_dataset_root = getattr(args, "trajectory_dataset_root", None) or derive_lerobot_dataset_root(
+            multi_view_video_root
+        )
+        trajectory_views = getattr(args, "trajectory_views", None) or derive_trajectory_views(views)
+        trajectory_primary_view = getattr(args, "trajectory_primary_view", None) or derive_trajectory_primary_view(views)
         trajectory_image_dir = args.trajectory_image_dir or (args.output_dir / "trajectory_first_frames")
         trajectory_outputs = build_trajectory_task_outputs(
             time_items=time_items,
             output_dir=args.output_dir,
-            dataset_root=args.trajectory_dataset_root,
-            views=args.trajectory_views,
-            primary_view=args.trajectory_primary_view,
+            dataset_root=trajectory_dataset_root,
+            views=trajectory_views,
+            primary_view=trajectory_primary_view,
             image_dir=trajectory_image_dir,
             num_keypoints=int(args.trajectory_num_keypoints),
             left_xyz_indices=args.trajectory_left_xyz_indices,
@@ -3675,10 +3697,10 @@ def main() -> int:
             {
                 **common,
                 "task": "trajectory_prediction",
-                "dataset_root": str(args.trajectory_dataset_root),
+                "dataset_root": str(trajectory_dataset_root),
                 "image_dir": str(trajectory_image_dir),
-                "views": args.trajectory_views,
-                "primary_view": args.trajectory_primary_view,
+                "views": trajectory_views,
+                "primary_view": trajectory_primary_view,
                 "internal": "gripper",
                 "num_keypoints": int(args.trajectory_num_keypoints),
                 "outputs": trajectory_outputs,
