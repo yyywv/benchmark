@@ -221,6 +221,13 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     return 1 if fails else 0
 
 
+def cmd_pack(args: argparse.Namespace) -> int:
+    info = report.pack(Path(args.results_dir), Path(args.output), full=args.full)
+    print(f"打包 {info['files']} 个文件 -> {info['output']}  ({info['bytes']/1e6:.1f} MB)")
+    print("回传：scp " + info["output"] + " <目标主机>:<路径>")
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     rows: list[dict[str, Any]] = []
     for directory in args.results_dirs or [Path(args.results_dir)]:
@@ -293,6 +300,11 @@ def main(argv: list[str] | None = None) -> int:
                                help="结果目录，可给多个（多机合并）")
     report_parser.add_argument("--csv", default=None)
     report_parser.set_defaults(func=cmd_report)
+
+    pack_parser = sub.add_parser("pack", help="打包结果供 scp 回传")
+    pack_parser.add_argument("-o", "--output", default="robochrono-results.tar.gz")
+    pack_parser.add_argument("--full", action="store_true", help="连媒体缓存一起带上")
+    pack_parser.set_defaults(func=cmd_pack)
 
     args = parser.parse_args(argv)
     return args.func(args)

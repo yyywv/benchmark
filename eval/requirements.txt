@@ -1,0 +1,17 @@
+accelerate==1.6.0
+decord==0.6.0
+einops==0.8.1
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+pandas==2.2.3
+pillow==11.1.0
+protobuf==7.35.1
+PyYAML==6.0.2
+qwen-vl-utils==0.0.14
+requests==2.32.3
+sentencepiece==0.2.0
+timm==1.0.15
+torch==2.6.0
+torchvision==0.21.0
+tqdm==4.67.1
+transformers==4.57.6

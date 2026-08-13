@@ -200,3 +200,36 @@ def to_csv(rows: list[dict[str, Any]], path: Path) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k) for k in fields})
+
+
+# --------------------------------------------------------------------------
+# 打包回传
+# --------------------------------------------------------------------------
+
+
+def pack(results_dir: Path, output: Path, full: bool = False) -> dict[str, Any]:
+    """把结果打成一个 tar.gz，供 scp 回传。
+
+    默认只带第 1 层（汇总）与第 2 层（逐题精简记录），这两层加起来在全矩阵下
+    约几百 MB；``--full`` 才带上媒体缓存等大件。
+    """
+    import tarfile
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    patterns = ["*.summary.json", "*.meta.json", "*.jsonl"]
+    files: list[Path] = []
+    for pattern in patterns:
+        files.extend(sorted(results_dir.rglob(pattern)))
+    if not full:
+        # 媒体缓存是本地中间产物，回传没有意义
+        files = [f for f in files if ".media_cache" not in f.parts]
+
+    with tarfile.open(output, "w:gz") as tar:
+        for path in files:
+            tar.add(path, arcname=str(path.relative_to(results_dir)))
+
+    return {
+        "files": len(files),
+        "bytes": output.stat().st_size,
+        "output": str(output),
+    }
