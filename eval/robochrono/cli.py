@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import engine, matrix, report, tasks
+from . import engine, matrix, preflight, report, tasks
 from .store import ResultStore
 from .tasks.base import load_items
 from .vlm_api import runtime_config
@@ -189,6 +189,15 @@ def cmd_estimate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_preflight(args: argparse.Namespace) -> int:
+    load_keys()
+    plan, (specs, skipped) = _expand(args)
+    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    checks, fails = preflight.run_all(plan, specs, Path(args.datasets_root), config, skipped)
+    print(preflight.format_checks(checks, skipped))
+    return 1 if fails else 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     rows: list[dict[str, Any]] = []
     for directory in args.results_dirs or [Path(args.results_dir)]:
@@ -236,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, help_text, func in (
         ("plan", "展开 (模型 × 任务族 × 任务) 矩阵", cmd_plan),
         ("estimate", "估算调用量与媒体体积（不调模型）", cmd_estimate),
+        ("preflight", "开跑前自检：环境 / GPU / 权重 / 密钥 / 数据", cmd_preflight),
     ):
         sub_parser = sub.add_parser(name, help=help_text)
         sub_parser.add_argument("--plan", default=str(DEFAULT_PLAN))

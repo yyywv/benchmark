@@ -222,6 +222,13 @@ def runtime_config(
     if not local_provider and require_api_key and not api_key:
         raise ValueError(f"Missing API key. Set {api_key_env} or pass --api-key.")
 
+    # 本地权重的相对路径以「配置文件所在目录的上一级」（即 eval/）为基准，
+    # 而不是当前工作目录 —— 否则从 eval/ 里运行会得到 eval/eval/models/...
+    if local_provider and model and config_path is not None:
+        model_path = Path(str(model))
+        if not model_path.is_absolute():
+            model = str((Path(config_path).resolve().parent.parent / model_path).resolve())
+
     frames = resolve_frames(provider, defaults, strict=bool(config.get("strict_frames", False)))
 
     max_new_tokens = int(provider.get("max_new_tokens", defaults.get("max_new_tokens", 256)))
