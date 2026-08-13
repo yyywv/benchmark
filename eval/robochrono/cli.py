@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import engine, matrix, preflight, report, tasks
+from . import engine, matrix, matrix_run, pool, preflight, report, tasks
 from .store import ResultStore
 from .tasks.base import load_items
 from .vlm_api import runtime_config
@@ -189,6 +189,29 @@ def cmd_estimate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_matrix(args: argparse.Namespace) -> int:
+    """按矩阵跑：model-major 调度，本地模型多卡并行。"""
+    load_keys()
+    plan, (specs, skipped) = _expand(args)
+    if not specs:
+        print("矩阵为空")
+        return 1
+    gpus = pool.visible_gpus(args.gpus)
+    print(f"矩阵 {len(specs)} 个 run，跳过 {len(skipped)} 个，可用 GPU {gpus or '无'}")
+    failures = matrix_run.run_matrix(
+        plan, specs,
+        config_path=Path(args.config),
+        datasets_root=Path(args.datasets_root),
+        results_root=Path(args.results_dir),
+        gpus=gpus,
+        flags={"strip_reasoning": args.strip_reasoning, "null_text_fix": args.null_text_fix},
+        limit_items=args.limit_items,
+        limit_groups=args.limit_groups,
+        overwrite=args.overwrite,
+    )
+    return 1 if failures else 0
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     load_keys()
     plan, (specs, skipped) = _expand(args)
@@ -252,6 +275,18 @@ def main(argv: list[str] | None = None) -> int:
         sub_parser.add_argument("--shard", default=None, help="形如 1/4，多机分工用")
         sub_parser.add_argument("--only", choices=["local", "api"], default=None)
         sub_parser.set_defaults(func=func)
+
+    matrix_parser = sub.add_parser("matrix", help="按 plan.json 跑整个矩阵（本地模型多卡并行）")
+    matrix_parser.add_argument("--plan", default=str(DEFAULT_PLAN))
+    matrix_parser.add_argument("--shard", default=None, help="形如 1/4，多机分工用")
+    matrix_parser.add_argument("--only", choices=["local", "api"], default=None)
+    matrix_parser.add_argument("--gpus", type=int, default=None, help="使用前 N 张卡，默认全部")
+    matrix_parser.add_argument("--limit-items", type=int, default=None)
+    matrix_parser.add_argument("--limit-groups", type=int, default=None)
+    matrix_parser.add_argument("--overwrite", action="store_true")
+    matrix_parser.add_argument("--strip-reasoning", action="store_true")
+    matrix_parser.add_argument("--null-text-fix", action="store_true")
+    matrix_parser.set_defaults(func=cmd_matrix)
 
     report_parser = sub.add_parser("report", help="汇总结果成对比表")
     report_parser.add_argument("results_dirs", nargs="*", type=Path,
