@@ -140,6 +140,28 @@ benchmark/
 | BC-06 | `planning` / `planning_2` 配置分离 | 否（但改变默认输入文件） |
 | BC-07 | SenseNova 模型命名更正 | 否（仅改配置名） |
 | BC-08 | QA JSON 路径规范化 | 否（但会改写数据文件） |
+| BC-09 | 抽帧策略统一 | **是** —— 但**方案未定，暂时挂起**，见下 |
+
+### BC-09 · 抽帧策略统一 —— 已挂起
+
+Time EQA 的抽帧策略是本次重构中唯一悬而未决的破坏性变更。调查已完成，
+方案待团队确认后接续。完整记录见 **[抽帧问题调查](eval/docs/frame_sampling_investigation.md)**，
+官方推荐值调研见 **[官方推荐配置调研](eval/docs/official_config_survey.md)**。
+
+一句话概括：15 个模型在 Time EQA 上看到的帧数相差 2 倍以上，其中 6 个不可知；
+当前配置下 InternVL 系还会直接 OOM 跑不完。已定的 fps=1 / fps=2 双档方案
+在长 episode 的任务族上对 InternVL 系不可行，需要补一个上限规则。
+
+**挂起期间仍要做的三件事**（与协议选择无关，不阻塞）：
+
+1. `num_segments` 改为**逐视频运行时计算**（`round(时长 × fps)`），不再是静态配置值
+2. 配置 schema 用 `frames: {mode: fps|uniform|native, value: N}` 并**强制互斥** ——
+   同时给出多个抽帧参数直接报错，杜绝当前 `video_sample_fps` 静默架空 `num_segments` 这种情况
+3. 结果文件记录**实际使用的帧数**，以及 API 响应的 `usage`
+   （现在 `raw, model_text = call_vlm(...)` 拿到原始响应后直接丢弃）
+
+这样等协议定下来，改一行配置即可生效，不用返工。其余八个任务不受影响 ——
+它们要么用 4 秒切片（帧数在 4~8 之间，差异不足以影响结论），要么只送静态图。
 
 ---
 
@@ -407,7 +429,7 @@ python -m robochrono pack -o robochrono-results.tar.zst
 | 阶段 | 内容 | 门禁 |
 | --- | --- | --- |
 | 0 ✅ | 建 `eval/` 骨架、迁数据、建 conda 环境、拉验证模型、路径规范化（BC-08） | 全部 9 个任务的媒体在本机可解析 |
-| 1 | 抽公共层 + Task 协议 + BC-01～BC-07 | **`replay` 回归：关闭 BC-01/02 时新旧 summary 逐字节相同** |
+| 1 | 抽公共层 + Task 协议 + BC-01～BC-07 + BC-09 的三项管道改造 | **`replay` 回归：关闭 BC-01/02 时新旧 summary 逐字节相同** |
 | 2 | JSONL 分层存储 + matrix + `estimate` 成本表 | stack_cubes × 1 本地 + 1 API 模型全 9 任务跑通 |
 | 3 | GPU worker 池 + 两级分片 + preflight 显存实测 | 8 卡吃满，单模型全族跑通 |
 | 4 | report / pack / `run.sh` / RUNBOOK / `requirements.txt` | 同事零沟通成本上手 |
@@ -549,10 +571,34 @@ Time EQA 送的是**整段 episode**（stack_cubes 每段 73.2 秒 @ 20 fps）�
 
 - 另外 19 个任务族的 QA 数据目前不在手上。HuggingFace 上的 `yyyyywv/ROBOCHRONO` 只有 7 个族（airpods / express / gift_inhand / stack_cubes / tea / tea2 / wash，共约 61 GB），本地只下了 stack_cubes（4.40 GB）。全量铺开前需要确认其余数据的来源与生成器版本。
 
+**部署层面的阻塞项（新增，2026-08-13）**
+
+调研官方推荐配置时发现，各模型要求的 transformers 版本互不兼容：
+
+```
+RynnBrain-2B      官方要求 transformers==4.57.1
+RynnBrain1.1-2B   官方要求 transformers==5.2.0
+InternVL 系        4.56.2 实测可用
+冻结代码下限        ≥4.56（因为用了 dtype= 而非 torch_dtype=）
+```
+
+**单一 conda 环境无法同时满足。** 要么放弃「遵循官方版本」，要么按模型分环境部署 ——
+后者会把交付形态从「一个环境」变成「一套环境矩阵」，同事的部署成本明显上升。
+这一条需要在阶段 3 之前定下来，因为它决定 GPU worker 池怎么组织。
+
+**模型定位存疑**
+
+`Cosmos3-Edge-2B` 官方定位是 **omnimodal world model**（输出文本、图像、视频、动作），
+`library_name: cosmos`、tags 含 `diffusers`，README 中**没有任何问答式推理示例**，
+全部是视频生成。我们用 `AutoModelForImageTextToText` 加载属于非官方用法，
+它能否稳定产出可解析的选择题答案**未经验证**。建议在正式跑之前先单独验证，
+否则可能白跑 20 个族。
+
 **已知风险**
 
 | 风险 | 说明 |
 | --- | --- |
+| 任务族数据高度异构 | stack_cubes 是 20 fps / 45–81 秒，tea 是 **25 fps / 119.8 秒**。只抽查了两族，其余 18 族的时长与帧率分布未知。任何按 fps 定的策略都会因族而异，preflight 必须先扫一遍全部族的媒体特征。 |
 | 数据与生成器版本不一致 | 手上的 `time_vqa.json` 含 `time_view` 字段且实际是**单视角**（`view_order: ['left_eye']`），而 repo 里当前的 `data/time_unders_workflow.py` 根本没有这个字段。说明这批 QA 是比 repo 更新的一版生成器产出的。README 描述的「多视角拼接后送入」与实际数据不符，解读 Time EQA 结果时需注意。 |
 | 其他族的 trajectory 首帧可能抽错 | 最近的提交 `daee5cc` 把 trajectory 首帧抽取从硬编码 `trajectory_fps=20.0` 改为读视频实际帧率。stack_cubes 实测就是 20 fps，已下载的 1,200 张首帧正确；但其他族若不是 20 fps，旧代码产出的 QA 数据首帧是错位的，2D 真值会叠在时间上对不齐的图上。用之前需要先验帧率。 |
 | API 成本 | 245,000 次带视频 / 图片的付费调用，单次媒体可达数 MB。必须先跑 `estimate` 并设预算上限，建议先用一个族验真实单价再全量铺开。 |
