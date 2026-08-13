@@ -113,7 +113,7 @@ transformers 按 repo id 建动态模块目录，而 id 中的 `1.1` 含点号�
 | dtype | `torch.bfloat16` | L2 | 一致 |
 | 视频抽帧 | 未明示 | — | 我们经 `qwen_vl_utils`（L5） |
 
-**分歧 #6（最严重）：两个 RynnBrain 要求互不兼容的 transformers 版本。**
+**分歧 #6：两个 RynnBrain 要求互不兼容的 transformers 版本。**
 
 ```
 RynnBrain-2B      transformers==4.57.1
@@ -122,7 +122,42 @@ InternVL 系       4.56.2 实测可用
 冻结代码下限       ≥4.56（因为用了 dtype= 而非 torch_dtype=）
 ```
 
-单一环境无法同时满足。要么放弃"遵循官方版本"，要么按模型分环境部署。这直接影响交付形态。
+### 实测结论（2026-08-14）：4.57.6 覆盖除 RynnBrain1.1-2B 外的全部
+
+在克隆环境里逐项实测（9 项检查：Auto 类导入、InternVL 自定义代码加载、
+tokenizer、`dtype=` 关键字、decord 抽帧、`model.chat()` 视频推理、
+`qwen_vl_utils`、`AutoModelForImageTextToText`、eval 全链路 replay 回归）：
+
+| 版本 | 结果 |
+| --- | --- |
+| 4.51.3 | ✗ 冻结代码的 `dtype=` 被透传给模型构造函数，报 unexpected keyword argument |
+| 4.56.2 | ✓ 可用，但低于 RynnBrain-2B 官方要求的 4.57.1 |
+| **4.57.6** | **✓ 9/9 全过，且满足 ≥4.57.1** |
+| 5.2.0 | ✗ InternVL 自定义代码在 meta device 下构造即崩 |
+
+**5.2.0 失败的确切原因：**
+
+```
+modeling_intern_vit.py:312
+    dpr = [x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers)]
+RuntimeError: Tensor.item() cannot be called on meta tensors
+```
+
+transformers 5.x 在 meta 设备下构造模型，而这行代码调了 `.item()`。
+`low_cpu_mem_usage` 与 `device_map` 的各种组合都试过，全部失败；
+把这一行改成纯 Python 计算之后**仍然报同样的错**，说明同类不兼容点不止一处 ——
+打补丁是无底洞，不是一行能解决的。
+
+顺带一提：5.x 会把模块目录名里的连字符替换掉
+（`SenseNova_hyphen_SI_hyphen_1_1_hyphen_InternVL3_hyphen_2B`），
+也就是说我们为 4.x 做的 `patch_local_model.py` 那个修复在 5.x 上原本是不需要的。
+
+**部署结论：** 主环境锁 `transformers==4.57.6`，覆盖 InternVL ×3、Qwen ×3、
+RynnBrain-2B、Cosmos-Reason2 等；**只有 RynnBrain1.1-2B 需要单独环境**。
+不是「每个模型一套环境」，而是「一主一副」，同事的部署成本可以接受。
+
+升级 4.56.2 → 4.57.6 后重跑全部回归与真实模型冒烟，**分数逐位不变**
+（understanding 0.5、trajectory_2D 0.278795），确认该升级不影响评测结果。
 
 ---
 
