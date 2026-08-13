@@ -141,6 +141,36 @@ benchmark/
 | BC-07 | SenseNova 模型命名更正 | 否（仅改配置名） |
 | BC-08 | QA JSON 路径规范化 | 否（但会改写数据文件） |
 | BC-09 | 抽帧策略统一 | **是** —— 但**方案未定，暂时挂起**，见下 |
+| BC-10 | 修复 `text: null` 选项导致的误判 | **是** —— 新发现的评分 bug，默认关闭待确认 |
+
+### BC-10 · `text: null` 选项导致「none」被误判为选项 A
+
+阶段 1 的解析等价性测试挖出来的**真实评分 bug**。
+
+`left_right` 和 `image_in_video` 的选项是图片，`text` 字段全为 `null`。
+冻结脚本取选项文本时写的是：
+
+```python
+option_text = normalize_text(str(option.get("text", "")))   # None -> "None" -> "none"
+```
+
+`str(None)` 得到字符串 `"None"`，归一化后成为 `"none"`。于是 `extract_choice`
+的文本匹配环节里，**任何包含 "none" 的模型输出都会匹配上第一个选项**：
+
+```
+模型输出 "none of these"  →  判为 A  →  实际应为 E（"All other options are wrong."）
+```
+
+而这两个任务恰好都设了 none-option，「none of these」正是模型表达该选项最自然的
+说法之一。也就是说，**模型选对了 none-option，却被系统性记成选了 A**。
+
+打开 BC-10 后，`text` 为 `null` 的选项不参与文本匹配。
+
+**影响范围：** 仅 `left_right`（600 题/族）与 `image_in_video`（300 题/族）。
+具体有多少题受影响取决于各模型实际输出中 "none" 的出现频率，
+可以用 replay 在已有结果上离线统计，不需要重跑模型。
+
+默认关闭以保证 replay 回归通过；是否启用请团队确认。
 
 ### BC-09 · 抽帧策略统一 —— 已挂起
 
