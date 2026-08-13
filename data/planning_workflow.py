@@ -119,7 +119,6 @@ CONFIG_KEYS = {
     "trajectory_left_xyz_indices",
     "trajectory_right_xyz_indices",
     "trajectory_decimals",
-    "trajectory_fps",
     "trajectory_use_base_to_camera_extrinsic",
     "trajectory_base_to_camera_xyz",
     "trajectory_base_to_camera_rpy",
@@ -181,7 +180,6 @@ def default_config() -> dict[str, Any]:
         "trajectory_left_xyz_indices": "0:3",
         "trajectory_right_xyz_indices": "7:10",
         "trajectory_decimals": 6,
-        "trajectory_fps": 20.0,
         "trajectory_use_base_to_camera_extrinsic": True,
         "trajectory_base_to_camera_xyz": [0.093353689, 0.033, 1.260691643],
         "trajectory_base_to_camera_rpy": [-2.3562, 0.0, -1.5708],
@@ -2268,7 +2266,6 @@ TRAJECTORY_DEFAULT_PROMPT_3D = (
     "needed to complete this task from the main viewpoint ({primary_view}) onward."
 )
 TRAJECTORY_DEFAULT_NUM_KEYPOINTS = 10
-TRAJECTORY_DEFAULT_FPS = 20.0
 TRAJECTORY_DEFAULT_INTERNAL = "gripper"
 TRAJECTORY_DEFAULT_LEFT_XYZ_INDICES = "0:3"
 TRAJECTORY_DEFAULT_RIGHT_XYZ_INDICES = "7:10"
@@ -2896,7 +2893,6 @@ def trajectory_extract_first_frame(
     view: str,
     timestamp: float,
     output_path: Path,
-    fps: float,
     overwrite: bool,
 ) -> Path:
     if output_path.exists() and not overwrite:
@@ -2920,7 +2916,12 @@ def trajectory_extract_first_frame(
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
     try:
-        frame_index = max(0, int(math.floor(timestamp * fps)))
+        video_fps = float(cap.get(cv2.CAP_PROP_FPS))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if video_fps <= 0 or frame_count <= 0:
+            raise ValueError(f"Invalid video metadata for {video_path}")
+
+        frame_index = min(max(0, int(math.floor(timestamp * video_fps))), frame_count - 1)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ok, frame = cap.read()
         if not ok:
@@ -3002,7 +3003,6 @@ def trajectory_build_trajectory_qa(args: argparse.Namespace) -> dict[str, Any]:
                     view=view,
                     timestamp=start_time,
                     output_path=args.image_dir / label / f"{item['id']}_{label}.jpg",
-                    fps=args.fps,
                     overwrite=args.overwrite_images,
                 )
                 images[label] = str(image_path)
@@ -3272,7 +3272,6 @@ def build_trajectory_task_outputs(
     left_xyz_indices: str,
     right_xyz_indices: str,
     decimals: int,
-    fps: float,
     use_base_to_camera_extrinsic: bool,
     base_to_camera_xyz: list[float],
     base_to_camera_rpy: list[float],
@@ -3310,7 +3309,6 @@ def build_trajectory_task_outputs(
         left_xyz_indices=left_xyz_indices,
         right_xyz_indices=right_xyz_indices,
         decimals=decimals,
-        fps=fps,
         use_base_to_camera_extrinsic=use_base_to_camera_extrinsic,
         base_to_camera_xyz=base_to_camera_xyz,
         base_to_camera_rpy=base_to_camera_rpy,
@@ -3407,7 +3405,6 @@ def main() -> int:
     parser.add_argument("--trajectory-left-xyz-indices", default=argparse.SUPPRESS)
     parser.add_argument("--trajectory-right-xyz-indices", default=argparse.SUPPRESS)
     parser.add_argument("--trajectory-decimals", type=int, default=argparse.SUPPRESS)
-    parser.add_argument("--trajectory-fps", type=float, default=argparse.SUPPRESS)
     parser.add_argument(
         "--trajectory-use-base-to-camera-extrinsic",
         action=argparse.BooleanOptionalAction,
@@ -3665,7 +3662,6 @@ def main() -> int:
             left_xyz_indices=args.trajectory_left_xyz_indices,
             right_xyz_indices=args.trajectory_right_xyz_indices,
             decimals=int(args.trajectory_decimals),
-            fps=float(args.trajectory_fps),
             use_base_to_camera_extrinsic=bool(args.trajectory_use_base_to_camera_extrinsic),
             base_to_camera_xyz=[float(value) for value in args.trajectory_base_to_camera_xyz],
             base_to_camera_rpy=[float(value) for value in args.trajectory_base_to_camera_rpy],
