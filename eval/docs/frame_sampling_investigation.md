@@ -440,6 +440,41 @@ InternVL（num_segments=8）     2048 token / 5.35 s = 383 token/秒
 
 ---
 
+## 九之三、数据问题：8 个 planning clip 只有 1 帧
+
+8 卡全量验证时暴露的。`qwen_vl_utils` 报：
+
+```
+ValueError: nframes should in interval [2, 1], but got 0.
+```
+
+区间 `[2, 1]` 为空，说明视频只有 **1 帧**。查下来是生成侧的数据问题 ——
+stack_cubes 的 planning 里有 8 个 item 的时间窗只有 **0.05 秒**：
+
+| item | start | end | 时长 | 帧数 |
+| --- | ---: | ---: | ---: | ---: |
+| file-000-3_file-000-4_move_plan_next | 52.10 | 52.15 | 0.05 s | 1 |
+| file-002-3_plan_next | 38.45 | 38.50 | 0.05 s | 1 |
+| file-049-1_plan_next | 9.05 | 9.10 | 0.05 s | 1 |
+| …共 8 个 | | | | |
+
+`qwen_vl_utils` 的 `FRAME_FACTOR=2`（它做时间维度合并），
+`floor_by_factor(1, 2) = 0`，落在空区间上。
+
+**这个 bug 早于本次重构。** 冻结代码不传 fps，但 `smart_nframes` 里同样是
+`min(..., total_frames=1)` 再 `floor_by_factor(1,2)=0` —— 结果一致。
+只是此前从没有人用 Qwen 系权重跑过 planning，所以没暴露。
+InternVL 路径不受影响（`num_segments` 分支对单帧取中间那帧，正常）。
+
+**已加兜底：** 单帧视频抽成 JPEG 按图片送。单帧视频在信息量上就是一张图，
+这样最忠实，也避免整条 run 因 8 道题而失败。抽出的帧缓存在视频旁边。
+
+**但根子在数据上，建议反馈给生成侧：** 0.05 秒的时间窗意味着
+「预测下一步动作」这道题几乎没有视觉上下文，这 8 道题本身的有效性存疑，
+与用什么方式送给模型无关。
+
+---
+
 ## 十、挂起的待办
 
 | 项 | 阻塞在 |

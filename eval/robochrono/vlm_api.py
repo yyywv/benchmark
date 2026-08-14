@@ -353,10 +353,41 @@ def local_qwen_content(
         elif part_type == "image":
             content.append({"type": "image", "image": str(part["path"])})
         elif part_type == "video":
-            content.append({"type": "video", "video": str(part["path"]), **video_extra})
+            path = str(part["path"])
+            # qwen_vl_utils 的 FRAME_FACTOR=2（它做时间维度合并），单帧视频会算出
+            # nframes=0 并抛 "nframes should in interval [2, 1]"。
+            # stack_cubes 的 planning 里有 8 个 clip 的时间窗只有 0.05 秒 = 1 帧
+            # （start/end 相差 0.05），属于生成侧的数据问题。
+            # 单帧视频在信息量上就是一张图，按图片送最忠实，也避免整条 run 失败。
+            frame = _single_frame_fallback(path)
+            if frame is not None:
+                content.append({"type": "image", "image": frame})
+            else:
+                content.append({"type": "video", "video": path, **video_extra})
         else:
             raise ValueError(f"Unsupported content part type for local_qwen: {part_type}")
     return content
+
+
+def _single_frame_fallback(path: str) -> str | None:
+    """单帧视频返回抽出来的图片路径，否则返回 None。
+
+    抽出的帧缓存在视频旁边，只做一次。
+    """
+    try:
+        from decord import VideoReader, cpu
+
+        video = VideoReader(str(path), ctx=cpu(0), num_threads=1)
+        if len(video) >= 2:
+            return None
+        cache = Path(str(path)).with_suffix(".singleframe.jpg")
+        if not cache.exists():
+            from PIL import Image
+
+            Image.fromarray(video[0].asnumpy()).save(cache, quality=95)
+        return str(cache)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def load_local_qwen(model_name: str) -> tuple[Any, Any]:
