@@ -60,7 +60,10 @@
       "media_url_format": "data_url",
       "api_url_env": "DASHSCOPE_API_URL",
       "max_request_bytes": 10000000,
-      "media_cache_dir": "results/.media_cache"
+      "media_cache_dir": "results/.media_cache",
+      "concurrency": 8,
+      "rate_limit": 0.0,
+      "min_video_seconds": 2.0
     },
     "replay": {
       "type": "replay",

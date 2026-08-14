@@ -44,13 +44,27 @@ class ResultStore:
     # -- 读 ----------------------------------------------------------------
 
     def rows(self) -> Iterator[dict[str, Any]]:
+        """逐行读结果。**容忍尾部残行** —— 进程被 kill、OOM 或断电时，
+        最后一行可能只写了一半。直接 ``json.loads`` 会抛异常，导致断点续跑
+        和导出全部失败，等于因为半行数据丢掉整个 run 的成果。
+
+        只在文件末尾容忍，中间出现坏行说明是别的问题（比如两个进程同时
+        往一个文件追加），那种情况必须报出来而不是静默跳过。
+        """
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+            lines = [line.strip() for line in handle]
+        for index, line in enumerate(lines):
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                if index == len(lines) - 1:
+                    print(f"  {self.path.name}: 丢弃尾部残行（上次运行被中断）", flush=True)
+                    return
+                raise
 
     def completed_ids(self) -> set[str]:
         """已完成的题目 id。与冻结版 ``is_finished`` 口径一致：
@@ -61,6 +75,34 @@ class ResultStore:
                 done.add(str(row.get("id")))
         return done
 
+    def final_rows(self) -> list[dict[str, Any]]:
+        """每个 id 只保留一行 —— 汇总与导出都必须走这里，不能直接用 ``rows()``。
+
+        JSONL 是追加日志，同一个 id 可能出现多次：某次跑失败写了 error 行，
+        续跑时 ``completed_ids`` 认为它没完成又跑了一遍并追加成功行。
+        直接把两行都喂给 summarize，那道题就被计了两次，分母和分子都是错的。
+
+        取舍规则与 ``completed_ids`` 保持一致，否则「算完成」和「算进分数」
+        会是两套口径：
+          - 有成功行就取**最后一条成功行**（重跑覆盖旧结果）
+          - 全是失败行才取最后一条失败行（如实反映这题没做出来）
+
+        注意不能简单「后来者覆盖」：进程被错误配置打断时，可能在已经成功的
+        id 后面又追加了 error 行，那时最后一条恰恰是错的。
+        """
+        best: dict[str, dict[str, Any]] = {}
+        for row in self.rows():
+            key = str(row.get("id"))
+            ok = bool(row.get("model_output")) and not row.get("error")
+            previous = best.get(key)
+            if previous is None:
+                best[key] = row
+                continue
+            previous_ok = bool(previous.get("model_output")) and not previous.get("error")
+            if ok or not previous_ok:
+                best[key] = row
+        return list(best.values())
+
     # -- 导出 --------------------------------------------------------------
 
     def export(self, output_path: Path, summary: dict[str, Any], items_by_id: dict[str, dict[str, Any]] | None = None) -> None:
@@ -70,7 +112,7 @@ class ResultStore:
         冻结版逐字段一致；不给出时导出精简版。
         """
         results = []
-        for row in self.rows():
+        for row in self.final_rows():
             if items_by_id:
                 item = items_by_id.get(str(row.get("id")))
                 if item:

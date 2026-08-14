@@ -17,6 +17,7 @@ import base64
 import json
 import mimetypes
 import os
+import random
 import subprocess
 import tempfile
 import time
@@ -253,6 +254,9 @@ def runtime_config(
         "thinking": str(thinking),
         "timeout": int(timeout),
         "max_retries": int(max_retries),
+        # 并发只对 API provider 生效；本地模型的并行由 GPU worker 池负责，两者不叠加。
+        "concurrency": int(provider.get("concurrency", defaults.get("concurrency", 1))),
+        "rate_limit": float(provider.get("rate_limit", defaults.get("rate_limit", 0.0))),
         "media_url_format": str(provider.get("media_url_format") or defaults.get("media_url_format") or ("base64" if provider_label == "glm" else "data_url")),
         "send_thinking": bool(provider.get("send_thinking", False)),
         "extra_payload": provider.get("extra_payload", {}),
@@ -265,6 +269,8 @@ def runtime_config(
         # BC-11：请求体预算。默认 0 = 不做任何媒体处理，超限就让它 413 并如实记录。
         "max_request_bytes": int(provider.get("max_request_bytes", defaults.get("max_request_bytes", 0))),
         "media_cache_dir": str(provider.get("media_cache_dir", defaults.get("media_cache_dir", ""))),
+        # BC-13：服务端要求的视频最短时长，0 表示不处理
+        "min_video_seconds": float(provider.get("min_video_seconds", defaults.get("min_video_seconds", 0.0))),
         # 加载后覆盖 LLM 的注意力实现。留空 = 不干预，保持模型代码的默认选择。
         "attn_implementation": str(provider.get("attn_implementation", defaults.get("attn_implementation", ""))),
         "max_image_tiles": int(provider.get("max_image_tiles", defaults.get("max_image_tiles", 12))),
@@ -1222,6 +1228,22 @@ def request_replay(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict
     return {"choices": [{"message": {"content": table[key]}}], "_replay": True}
 
 
+def _backoff(attempt: int, retry_after: str | None = None) -> float:
+    """重试等待时长。
+
+    服务端给了 ``Retry-After`` 就听它的 —— 它比我们的猜测准。
+    否则指数退避 **加抖动**：并发路径下多个线程往往同时撞上 429，
+    没有抖动它们会锁步重试、再次同时撞上，等于没退避。
+    """
+    if retry_after:
+        try:
+            # 只支持 delta-seconds 形式；HTTP-date 形式罕见，落到指数退避即可
+            return max(0.0, min(120.0, float(retry_after)))
+        except ValueError:
+            pass
+    return min(60.0, 2 ** attempt) * random.uniform(0.5, 1.5)
+
+
 def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[str, Any]:
     provider_type = runtime["type"]
     if provider_type == "replay":
@@ -1269,8 +1291,8 @@ def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[s
         try:
             response = requests.post(api_url, headers=headers, json=payload, timeout=runtime["timeout"])
             if response.status_code in {429, 500, 502, 503, 504} and attempt < runtime["max_retries"]:
-                wait = min(60, 2 ** attempt)
-                print(f"  HTTP {response.status_code}, retrying in {wait}s", flush=True)
+                wait = _backoff(attempt, response.headers.get("Retry-After"))
+                print(f"  HTTP {response.status_code}, retrying in {wait:.1f}s", flush=True)
                 time.sleep(wait)
                 continue
             response.raise_for_status()
@@ -1278,8 +1300,8 @@ def request_json(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> dict[s
         except (requests.ConnectionError, requests.Timeout) as exc:
             if attempt == runtime["max_retries"]:
                 raise
-            wait = min(60, 2 ** attempt)
-            print(f"  connection error (attempt {attempt}/{runtime['max_retries']}), retrying in {wait}s: {exc}", flush=True)
+            wait = _backoff(attempt)
+            print(f"  connection error (attempt {attempt}/{runtime['max_retries']}), retrying in {wait:.1f}s: {exc}", flush=True)
             time.sleep(wait)
         except HTTPError as exc:
             try:
@@ -1308,14 +1330,18 @@ def call_vlm(
     provider_type = runtime["type"]
     runtime["_frames_used"] = {}
 
-    # BC-11：远程 provider 有请求体上限，超了会 413。只有配置里给了预算才处理。
+    # BC-11：远程 provider 有请求体上限，超了会 413。
+    # BC-13：部分服务端还有视频最短时长约束，短片段会被 400 拒收。
+    # 两者都只在配置里显式给了阈值时才处理。
     media_transforms: list[dict[str, Any]] = []
     budget = int(runtime.get("max_request_bytes") or 0)
-    if budget > 0 and provider_type in {"openai_compatible", "gemini", "glm", "qwen"}:
+    min_seconds = float(runtime.get("min_video_seconds") or 0.0)
+    if (budget > 0 or min_seconds > 0) and provider_type in {"openai_compatible", "gemini", "glm", "qwen"}:
         from .media_prep import prepare_parts
 
         cache_dir = Path(runtime.get("media_cache_dir") or ".media_cache")
-        parts, media_transforms = prepare_parts(parts, budget, cache_dir)
+        parts, media_transforms = prepare_parts(
+            parts, budget or (1 << 62), cache_dir, min_video_seconds=min_seconds)
 
     raw = request_json(runtime, parts)
     text = response_text(raw, provider_type)

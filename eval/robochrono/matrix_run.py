@@ -4,7 +4,10 @@
 
 把 (模型 × 任务族 × 任务) 的矩阵按模型分组依次执行。对本地模型，
 该模型下所有任务族、所有任务的 unit 汇成一个队列摊给各卡；
-对 API 模型，走串行路径（并发留待后续，先保证正确）。
+对 API 模型，瓶颈是网络往返而非算力，用线程池并发（``--api-concurrency``），
+并发等价性由 tests/test_concurrency_equivalence.py 保证。
+
+两种并发不叠加：本地模型即便走到单卡串行路径也保持 concurrency=1。
 """
 
 from __future__ import annotations
@@ -46,8 +49,35 @@ def _apply_frames(runtime: dict[str, Any], spec: RunSpec) -> dict[str, Any]:
     return runtime
 
 
+def _environment() -> dict[str, Any]:
+    """记录产出这批结果的运行环境。
+
+    这不是可有可无的元数据 —— 实测确认 **transformers 版本会改变模型输出**：
+    4.57.6 与 5.15.0 对同一段视频拼出的 prompt 差 2 个 token
+    （5.x 在整段视频外多包一层 `<|vision_start|>…<|vision_end|>`），
+    画面完全相同但输出跟着变。详见 docs/environments.md。
+
+    所以两批结果能不能放一起比，取决于它们是不是同一个版本产出的。
+    不记下来，事后无从判断。
+    """
+    import platform
+    import sys
+
+    info: dict[str, Any] = {
+        "python": platform.python_version(),
+        "executable": sys.executable,
+    }
+    for module in ("transformers", "torch", "qwen_vl_utils"):
+        try:
+            info[module] = __import__(module).__version__
+        except Exception:  # noqa: BLE001  API provider 不需要这些包
+            info[module] = None
+    return info
+
+
 def _meta(spec: RunSpec, runtime: dict[str, Any], qa_path: Path, flags: dict[str, Any]) -> dict[str, Any]:
     return {
+        "environment": _environment(),
         "model_name": spec.model.name,
         "provider": runtime["provider"],
         "model": runtime["model"],
@@ -78,6 +108,8 @@ def run_matrix(
     limit_items: int | None = None,
     limit_groups: int | None = None,
     overwrite: bool = False,
+    api_concurrency: int | None = None,
+    api_rate_limit: float | None = None,
 ) -> int:
     by_model: dict[str, list[RunSpec]] = {}
     for spec in specs:
@@ -100,6 +132,7 @@ def run_matrix(
                 model, model_specs, config_path=config_path, datasets_root=datasets_root,
                 results_root=results_root, flags=flags,
                 limit_items=limit_items, limit_groups=limit_groups, overwrite=overwrite,
+                api_concurrency=api_concurrency, api_rate_limit=api_rate_limit,
             )
     return failures
 
@@ -120,16 +153,25 @@ def _prepare(spec: RunSpec, datasets_root: Path, config_path: Path, model: Model
 
 
 def _run_serial(model, model_specs, *, config_path, datasets_root, results_root,
-                flags, limit_items, limit_groups, overwrite) -> int:
+                flags, limit_items, limit_groups, overwrite,
+                api_concurrency=None, api_rate_limit=None) -> int:
     failures = 0
     for spec in model_specs:
         print(f"\n--- {spec.family} × {spec.run} ---")
         try:
             _, runtime, store, items, task = _prepare(
                 spec, datasets_root, config_path, model, flags, results_root, overwrite)
+            # 本地模型即便走到串行路径（单卡）也不并发：瓶颈是 GPU 不是网络。
+            if model.is_local:
+                concurrency, rate_limit = 1, 0.0
+            else:
+                concurrency = api_concurrency if api_concurrency is not None else runtime.get("concurrency", 1)
+                rate_limit = api_rate_limit if api_rate_limit is not None else runtime.get("rate_limit", 0.0)
             summary = engine.run(task, items, runtime, store,
                                  limit_items=limit_items, limit_groups=limit_groups,
-                                 overwrite=False)
+                                 overwrite=False,
+                                 concurrency=max(1, int(concurrency)),
+                                 rate_limit=float(rate_limit))
             _write_summary(store, summary, spec)
         except Exception as exc:  # noqa: BLE001
             print(f"  RUN FAILED: {type(exc).__name__}: {exc}")
@@ -180,7 +222,7 @@ def _run_local_pool(model, model_specs, *, config_path, datasets_root, results_r
 
     for key, (spec, task) in contexts.items():
         store = stores[key]
-        summary = task.summarize(list(store.rows()), 0.0)
+        summary = task.summarize(store.final_rows(), 0.0)
         _write_summary(store, summary, spec)
     return 0
 

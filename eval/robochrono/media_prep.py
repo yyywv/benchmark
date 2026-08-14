@@ -31,8 +31,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -59,17 +61,29 @@ def _cache_path(source: Path, scale: float, crf: int, cache_dir: Path) -> Path:
 
 
 def _reencode(source: Path, dest: Path, scale: float, crf: int) -> bool:
+    """重编码到 dest。**先写临时文件再原子改名** —— API 并发路径下多个线程
+    可能同时压同一个视频，直接写 dest 会互相覆盖，更糟的是别的线程会把
+    写了一半的文件当成缓存命中发出去。
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # 临时名带 pid 与线程 id，保证同机多进程／多线程各写各的
+    tmp = dest.with_name(f".{dest.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
     # trunc(...*scale/2)*2 保证宽高是偶数，libx264 要求
     vf = f"scale=trunc(iw*{scale}/2)*2:trunc(ih*{scale}/2)*2"
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(source), "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
-        "-an", str(dest),
+        "-an", str(tmp),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+            return False
+        os.replace(tmp, dest)          # 同目录，原子
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)    # 失败路径上清理；成功时已被 replace 移走
 
 
 def shrink_video(source: Path, budget_bytes: int, cache_dir: Path) -> tuple[Path, dict[str, Any] | None]:
@@ -91,7 +105,9 @@ def shrink_video(source: Path, budget_bytes: int, cache_dir: Path) -> tuple[Path
                 continue
             if encoded_size(dest) <= budget_bytes:
                 return dest, _record(source, dest, scale, crf)
-            dest.unlink(missing_ok=True)
+            # 压完仍超预算 —— 保留而非删除。删除有两个问题：并发下可能删掉
+            # 另一个线程刚校验过的文件；而且下次跑还得重新 ffmpeg 一遍才知道
+            # 它不够小。留着，上面的 exists 分支会直接跳过这一档。
 
     return source, {
         "source": str(source),
@@ -99,6 +115,64 @@ def shrink_video(source: Path, budget_bytes: int, cache_dir: Path) -> tuple[Path
         "reason": "无法压缩到预算内",
         "source_encoded_bytes": encoded_size(source),
         "budget_bytes": budget_bytes,
+    }
+
+
+def video_duration(path: Path) -> float | None:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def pad_video(source: Path, min_seconds: float, cache_dir: Path) -> tuple[Path, dict[str, Any] | None]:
+    """把过短的视频用**末帧静止**补到 ``min_seconds``。
+
+    起因：qwen 的 video 接口拒收短于 2 秒的视频（``The video file is too short``）。
+    stack_cubes 的 image_in_video 里有 10/300 个片段是 1.3–1.9 秒，
+    不处理的话 API 模型会静默丢掉这些题，而本地模型跑得了 —— 跨模型对比就不成立了。
+
+    选克隆末帧而不是循环播放或变速：循环会让模型看到动作重复发生，
+    变速会改变运动速度，两者都可能改变答案。静止的尾巴不引入新事件。
+    """
+    duration = video_duration(source)
+    if duration is None or duration >= min_seconds:
+        return source, None
+
+    # 多补 0.1 秒，避免服务端按帧数取整后仍判定不足
+    pad = min_seconds - duration + 0.1
+    digest = hashlib.md5(f"{source.resolve()}|pad|{min_seconds}".encode()).hexdigest()[:16]
+    dest = cache_dir / f"{source.stem}__pad{digest}.mp4"
+
+    if not (dest.exists() and dest.stat().st_size > 0):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f".{dest.stem}.{os.getpid()}.{threading.get_ident()}.tmp.mp4")
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+            "-vf", f"tpad=stop_mode=clone:stop_duration={pad:.3f}",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-an", str(tmp),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+                return source, {"source": str(source), "failed": True,
+                                "reason": f"补长失败: {result.stderr.strip()[:120]}"}
+            os.replace(tmp, dest)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    return dest, {
+        "source": str(source),
+        "prepared": str(dest),
+        "op": "pad_to_min_duration",
+        "source_seconds": round(duration, 3),
+        "target_seconds": min_seconds,
+        "padded_seconds": round(pad, 3),
     }
 
 
@@ -117,8 +191,13 @@ def prepare_parts(
     parts: list[dict[str, Any]],
     max_request_bytes: int,
     cache_dir: Path,
+    min_video_seconds: float = 0.0,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """按整个请求的预算处理 parts。返回 (新 parts, 变换记录列表)。
+
+    两道处理，顺序不能反：
+      1. 补长（``min_video_seconds``）—— 服务端对最短时长有硬约束
+      2. 压缩（``max_request_bytes``）—— 补长会略微增大体积，必须在它之后算
 
     预算是**整个请求**的，不是单个文件的 —— image_in_video 会同时发一个视频
     和六张选项图。图片不动（体积小且是答案本身），只压视频。
@@ -127,26 +206,37 @@ def prepare_parts(
     if not media:
         return parts, []
 
-    budget = max_request_bytes - OVERHEAD_BYTES
-    image_bytes = sum(encoded_size(Path(p["path"])) for p in media if p["type"] == "image")
-    videos = [p for p in media if p["type"] == "video"]
-    total = image_bytes + sum(encoded_size(Path(p["path"])) for p in videos)
-
-    if total <= budget or not videos:
-        return parts, []
-
-    # 视频之间平分剩余预算
-    per_video = max(1, (budget - image_bytes) // len(videos))
     transforms: list[dict[str, Any]] = []
     replacement: dict[str, str] = {}
+    videos = [p for p in media if p["type"] == "video"]
 
-    for part in videos:
-        source = Path(part["path"])
-        prepared, record = shrink_video(source, per_video, cache_dir)
-        if record is not None:
-            transforms.append(record)
-        if prepared != source:
-            replacement[part["path"]] = str(prepared)
+    # -- 1. 补长 --
+    if min_video_seconds > 0:
+        for part in videos:
+            padded, record = pad_video(Path(part["path"]), min_video_seconds, cache_dir)
+            if record is not None:
+                transforms.append(record)
+            if str(padded) != part["path"]:
+                replacement[part["path"]] = str(padded)
+
+    # -- 2. 压缩 --
+    # 体积按补长后的文件算，否则预算会算漏
+    def current(part: dict[str, Any]) -> Path:
+        return Path(replacement.get(part["path"], part["path"]))
+
+    budget = max_request_bytes - OVERHEAD_BYTES
+    image_bytes = sum(encoded_size(Path(p["path"])) for p in media if p["type"] == "image")
+    total = image_bytes + sum(encoded_size(current(p)) for p in videos)
+
+    if videos and total > budget:
+        per_video = max(1, (budget - image_bytes) // len(videos))
+        for part in videos:
+            source = current(part)
+            prepared, record = shrink_video(source, per_video, cache_dir)
+            if record is not None:
+                transforms.append(record)
+            if prepared != source:
+                replacement[part["path"]] = str(prepared)
 
     if not replacement:
         return parts, transforms
