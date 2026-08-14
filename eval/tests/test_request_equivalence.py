@@ -28,7 +28,8 @@ from robochrono import tasks  # noqa: E402
 from robochrono.tasks.base import load_items  # noqa: E402
 
 QA = REPO / "eval/datasets/QA"
-SAMPLE = 12
+# 默认抽样 12 个 unit；--all 跑全量（2,700 题，几分钟）
+SAMPLE = None if "--all" in sys.argv else 12
 
 
 def frozen_parts(run: str, item: dict[str, Any], qa_path: Path,
@@ -106,7 +107,7 @@ def main() -> int:
 
         items = load_items(qa_path)
         task = tasks.build(run)
-        units = task.units(items)[:SAMPLE]
+        units = task.units(items) if SAMPLE is None else task.units(items)[:SAMPLE]
 
         bad_prompt = bad_media = 0
         first = ""
