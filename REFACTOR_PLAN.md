@@ -145,6 +145,38 @@ benchmark/
 | BC-11 | API 请求体预算适配 | 否（实测视觉 token 不变），但会改变传输的媒体 |
 | BC-12 | LLM 注意力实现改用 SDPA | 理论上是，实测 12/12 输出相同。**当前默认开启**，理由见下 |
 
+### BC-09 补记 · fps 协议对 Qwen 路径原本不生效
+
+实现协议时发现：冻结代码调 `process_vision_info(messages)` 时**没传任何覆盖参数**，
+所以 `qwen_vl_utils` 走自己的默认 `FPS=2.0`。若不修，
+**fps=1/2 协议只对 3 个 InternVL 模型生效，另外 5 个走 Qwen 路径的模型
+（Qwen3-VL ×3、RynnBrain ×2、Cosmos-Reason2）完全不受约束。**
+
+已修：把档位写进视频元素的 `fps` / `nframes` 字段。实测 RynnBrain-2B：
+
+```
+fps=1.0 → 16 帧
+fps=2.0 → 34 帧      （clip 17.7 秒）
+```
+
+**残余偏差（无法消除）：** 两条路径的取整规则不同 ——
+InternVL 用 `round(时长 × fps)`，`qwen_vl_utils` 用 `floor_to_even`
+（帧数必须是 2 的倍数，因为它做时间维度合并）。同一段 17.7 秒 clip：
+
+| | fps=1 | fps=2 |
+| --- | ---: | ---: |
+| InternVL | 18 | 35 |
+| Qwen 路径 | 16 | 34 |
+| 偏差 | 12% | 3% |
+
+比修之前的 2 倍差距好得多，但不是精确一致。若要求严格对齐，
+需要统一改用 `nframes` 显式指定并接受 Qwen 侧的偶数约束。
+
+`Cosmos3-Edge` 走第三条路径（模型自带 processor），抽帧仍不可控 ——
+这一条无解，只能记录实际帧数。
+
+---
+
 ### BC-12 · LLM 注意力实现改用 SDPA
 
 **这一条与其他 BC 不同：它当前是默认开启的，需要团队追认。**

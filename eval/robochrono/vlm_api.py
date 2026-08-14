@@ -323,7 +323,28 @@ def gemini_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
-def local_qwen_content(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def local_qwen_content(
+    parts: list[dict[str, Any]], frames: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """组装 qwen_vl_utils 的 messages 内容。
+
+    BC-09：抽帧档位必须显式传给 ``qwen_vl_utils``，否则它走自己的默认值
+    （``FPS=2.0``），我们的 fps 协议对这条路径就完全不生效 ——
+    而这条路径覆盖 5 个模型（Qwen3-VL ×3、RynnBrain ×2、Cosmos-Reason2）。
+    冻结版调 ``process_vision_info(messages)`` 时一个覆盖参数都没传。
+
+    ``qwen_vl_utils`` 读的是视频元素里的 ``fps`` / ``nframes``（二者互斥）。
+    """
+    frames = frames or {}
+    mode = frames.get("mode")
+    video_extra: dict[str, Any] = {}
+    if mode == "fps" and frames.get("value"):
+        video_extra["fps"] = float(frames["value"])
+    elif mode == "uniform" and frames.get("value"):
+        # nframes 必须是 FRAME_FACTOR(=2) 的倍数，否则库内部会报错
+        n = max(2, int(frames["value"]))
+        video_extra["nframes"] = n - (n % 2)
+
     content: list[dict[str, Any]] = []
     for part in parts:
         part_type = part.get("type")
@@ -332,7 +353,7 @@ def local_qwen_content(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif part_type == "image":
             content.append({"type": "image", "image": str(part["path"])})
         elif part_type == "video":
-            content.append({"type": "video", "video": str(part["path"])})
+            content.append({"type": "video", "video": str(part["path"]), **video_extra})
         else:
             raise ValueError(f"Unsupported content part type for local_qwen: {part_type}")
     return content
@@ -374,7 +395,7 @@ def request_local_qwen(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> 
     local_model, processor = load_local_qwen(runtime["model"])
     messages = [
         {"role": "system", "content": runtime["system_prompt"]},
-        {"role": "user", "content": local_qwen_content(parts)},
+        {"role": "user", "content": local_qwen_content(parts, runtime.get("frames"))},
     ]
     try:
         text = processor.apply_chat_template(
@@ -395,6 +416,13 @@ def request_local_qwen(runtime: dict[str, Any], parts: list[dict[str, Any]]) -> 
     except TypeError:
         image_inputs, video_inputs = process_vision_info(messages)
         video_kwargs = {}
+
+    # BC-09：记录 qwen_vl_utils 实际抽了多少帧
+    for index, video in enumerate(video_inputs or []):
+        tensor = video[0] if isinstance(video, (tuple, list)) else video
+        shape = getattr(tensor, "shape", None)
+        if shape is not None and len(shape) >= 1:
+            runtime.setdefault("_frames_used", {})[f"video{index}"] = int(shape[0])
 
     if video_inputs and isinstance(video_inputs[0], tuple):
         videos = []
@@ -472,7 +500,7 @@ def request_local_transformers_vlm(runtime: dict[str, Any], parts: list[dict[str
     local_model, processor = load_local_transformers_vlm(runtime["model"])
     messages = [
         {"role": "system", "content": runtime["system_prompt"]},
-        {"role": "user", "content": local_qwen_content(parts)},
+        {"role": "user", "content": local_qwen_content(parts, runtime.get("frames"))},
     ]
     try:
         text = processor.apply_chat_template(
@@ -493,6 +521,13 @@ def request_local_transformers_vlm(runtime: dict[str, Any], parts: list[dict[str
     except TypeError:
         image_inputs, video_inputs = process_vision_info(messages)
         video_kwargs = {}
+
+    # BC-09：记录 qwen_vl_utils 实际抽了多少帧
+    for index, video in enumerate(video_inputs or []):
+        tensor = video[0] if isinstance(video, (tuple, list)) else video
+        shape = getattr(tensor, "shape", None)
+        if shape is not None and len(shape) >= 1:
+            runtime.setdefault("_frames_used", {})[f"video{index}"] = int(shape[0])
 
     if video_inputs and isinstance(video_inputs[0], tuple):
         videos = []
