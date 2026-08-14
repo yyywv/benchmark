@@ -22,21 +22,37 @@
 
 ## 1. 准备环境
 
+**需要两套环境，这是硬约束不是偏好。** InternVL 系只能在 transformers 4.x 上跑，
+Cosmos3-Edge 只能在 5.x 上跑，两者互斥 —— 一套环境跑不完 15 个模型。
+
+推荐用 uv（迁到别的集群时只要一条命令，不用打包传 6 GB 的 conda 环境）：
+
 ```bash
 cd eval
-bash setup_env.sh          # 建 conda 环境 robochrono
-conda activate robochrono
+bash tools/setup_envs.sh
+# 国内集群走镜像：
+UV_INDEX=https://mirrors.ustc.edu.cn/pypi/simple bash tools/setup_envs.sh
 ```
 
-**transformers 必须是 4.57.6**，这是实测选定的：
+也保留了 conda 版（只建 groupA）：
 
-- `4.51.x` 会因为代码里的 `dtype=` 参数报 `unexpected keyword argument`
-- `5.x` 会因为 InternVL 自定义代码在 meta device 下调 `.item()` 而加载失败，
-  且打补丁修不完
-- `4.57.6` 九项检查全过，并满足 RynnBrain-2B 官方要求的 `>=4.57.1`
+```bash
+bash setup_env.sh && conda activate robochrono
+```
 
-**唯一的例外是 `RynnBrain1.1-2B`**，它官方要求 `transformers==5.2.0`，
-需要单独建一个环境跑，其余模型都在主环境里。
+两条路读的是**同一份依赖清单** `envs/groupA.txt`，不会各建各的。
+
+| | transformers | 覆盖 |
+| --- | --- | --- |
+| groupA | 4.57.6 | InternVL ×3、Qwen3-VL ×3、RynnBrain-2B、Cosmos-Reason2 |
+| groupB | 5.15.0 | Cosmos3-Edge、RynnBrain1.1-2B |
+
+版本是实测选的，不是抄官方推荐：`4.51.x` 因代码里的 `dtype=` 报
+`unexpected keyword argument`；`5.x` 上 InternVL 加载失败（5.2.0 是 meta tensor
+崩溃，5.15.0 是缺 `all_tied_weights_keys`）。详见 `docs/environments.md`。
+
+⚠️ **换 transformers 版本会改变模型输出** —— 这是实测结论，不是理论担忧。
+所以同一个模型的结果必须在同一个版本下产出，不要中途升级。详见报告第六节。
 
 ---
 
@@ -109,6 +125,15 @@ chmod 600 ~/.config/robochrono/keys.env
 
 ## 5. 跑
 
+如果配了多套环境，用 `dispatch` —— 它会把每个模型送到它该去的环境：
+
+```bash
+python -m robochrono dispatch -- --gpus 8
+python -m robochrono dispatch --dry-run -- --gpus 8    # 先看会执行什么
+```
+
+单一环境下直接用 `run.sh`：
+
 ```bash
 ./run.sh                          # 自检 → 估算 → 执行 → 汇总 → 打包
 ./run.sh --only api               # 只跑 API 模型，不需要 GPU
@@ -130,6 +155,7 @@ python -m robochrono preflight        # 自检
 python -m robochrono plan             # 看矩阵会展开成什么
 python -m robochrono estimate         # 估算调用量与媒体体积
 python -m robochrono matrix --gpus 8  # 执行
+python -m robochrono matrix --only api --api-concurrency 24   # API 并发
 python -m robochrono report results/ --csv results/summary.csv
 python -m robochrono pack -o out.tar.gz
 ```
