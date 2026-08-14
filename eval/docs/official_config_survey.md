@@ -175,7 +175,35 @@ RynnBrain-2B、Cosmos-Reason2 等；**只有 RynnBrain1.1-2B 需要单独环境*
 | 视频抽帧 | 无官方指引 |
 | 上下文 | `max_position_embeddings=131072`，而 `tokenizer_config.model_max_length=262144` |
 
-**分歧 #7：我们用 `AutoModelForImageTextToText` 加载它属于非官方用法。** 官方推荐用 `cosmos` 库。它能否稳定产出可解析的选择题答案未经验证。
+**分歧 #7（已证实为阻塞）：无法用标准 transformers 加载。**
+
+2026-08-14 下载权重实测：
+
+```
+ValueError: The checkpoint you are trying to load has model type `cosmos3_edge`
+but Transformers does not recognize this architecture.
+```
+
+逐项排查：
+
+| 检查项 | 结果 |
+| --- | --- |
+| `model_type` | `cosmos3_edge`，架构 `Cosmos3EdgeForConditionalGeneration` |
+| transformers 4.57.6 是否注册 | **否**（主干分支也没有） |
+| 目录内是否有 `.py` 自定义代码 | **没有** —— `trust_remote_code` 无从下手 |
+| 是否有 `auto_map` | **没有** |
+| PyPI 上的 `cosmos` 包 | 同名无关包（"Thin server application framework"） |
+| 官方安装方式 | `pip install -e packages/cosmos-framework`，从 GitHub 源码装 |
+| 模型卡里的 transformers 示例 | **没有** `AutoModel.from_pretrained` 示例 |
+
+目录里还有 `model_index.json`、`modular_model_index.json`、`scheduler/` —— diffusers 的产物。
+
+**也就是说 repo 里 `local_cosmos_transformers` 这条 adapter 对已发布的权重是不工作的。**
+（git 历史显示作者曾从 cosmos-framework 改为 transformers，可能当时用的是别的权重版本。）
+
+**需要团队决定：** 引入 NVIDIA 的 cosmos-framework 作为额外依赖，
+还是把 Cosmos3-Edge 移出评测名单。preflight 现在会在开跑前拦下它，
+不会跑到一半才整个模型失败。
 
 **分歧 #8：上下文两个数字矛盾**（131072 vs 262144）。位置编码容量通常是硬上限，应以 131072 为准，但需确认。
 
