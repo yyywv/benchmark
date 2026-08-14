@@ -519,8 +519,10 @@ def score_tolerance_for_item(item: dict[str, Any], expected: dict[str, list[list
 
 
 def distance_to_score(distance: float | None, tolerance: float) -> float | None:
-    if distance is None or tolerance <= 0:
+    if tolerance <= 0:
         return None
+    if distance is None:
+        return 0.0
     ratio = float(distance) / tolerance
     return 100.0 / (1.0 + ratio * ratio)
 
