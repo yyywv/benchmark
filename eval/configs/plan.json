@@ -11,7 +11,10 @@
     "frame_variants: 本地模型统一测 fps=1 与 fps=2 两档（团队定案）。",
     "  API 模型的抽帧在服务端，无法调整，只按默认跑一档。",
     "  该档位只对四个视频任务展开；五个静态图任务不受影响。",
-    "  frames 只影响预处理不影响权重，所以两档共用同一次模型加载。"
+    "  frames 只影响预处理不影响权重，所以两档共用同一次模型加载。",
+    "",
+    "Cosmos3-Edge-2B 已暂时移出：其架构 cosmos3_edge 无法被 transformers 加载，",
+    "  需要 NVIDIA 的 cosmos-framework。待团队决定后再加回。见 docs/official_config_survey.md #7。"
   ],
   "models": [
     {
@@ -25,12 +28,6 @@
       "provider": "local_rynnbrain_2b",
       "kind": "local",
       "note": "adapter: local_transformers_vlm，权重 4.88 GB"
-    },
-    {
-      "name": "Cosmos3-Edge-2B",
-      "provider": "local_cosmos3_edge_2b",
-      "kind": "local",
-      "note": "adapter: local_cosmos_transformers，定位存疑见调研 #7"
     },
     {
       "name": "Qwen3-VL-8B-Instruct",
