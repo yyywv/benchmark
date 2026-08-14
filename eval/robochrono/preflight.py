@@ -187,7 +187,29 @@ def check_models(plan: Plan, config: dict[str, Any]) -> list[Check]:
         detail = f"{sum(f.stat().st_size for f in path.rglob('*') if f.is_file())/1e9:.2f} GB"
         config_json = path / "config.json"
         if config_json.exists():
-            auto_map = json.loads(config_json.read_text(encoding="utf-8")).get("auto_map", {})
+            model_config = json.loads(config_json.read_text(encoding="utf-8"))
+
+            # 架构必须要么被 transformers 注册，要么带 trust_remote_code 的自定义代码。
+            # Cosmos3-Edge 两者皆无 —— 它要 NVIDIA 的 cosmos-framework（从 GitHub 源码装），
+            # 用标准 transformers 加载会报 "does not recognize this architecture"。
+            # 这类问题不在开跑前拦住，就会在跑到一半时整个模型全军覆没。
+            model_type = str(model_config.get("model_type", ""))
+            has_remote_code = bool(model_config.get("auto_map")) or any(path.glob("*.py"))
+            if model_type and not has_remote_code:
+                try:
+                    from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
+
+                    if model_type not in CONFIG_MAPPING_NAMES:
+                        out.append(Check(
+                            FAIL, f"模型 {model.name}",
+                            f"{detail}；架构 `{model_type}` 未被 transformers 注册，"
+                            "且目录内无自定义代码 —— 需要该模型自己的推理库",
+                        ))
+                        continue
+                except ImportError:
+                    pass
+
+            auto_map = model_config.get("auto_map", {})
             if any("--" in str(v) for v in auto_map.values()):
                 out.append(Check(WARN, f"模型 {model.name}",
                                  f"{detail}；auto_map 含跨仓库引用，"
