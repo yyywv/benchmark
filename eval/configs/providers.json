@@ -16,7 +16,13 @@
     "  BC-11  max_request_bytes：远程端点的请求体上限。实测该 MaaS 端点",
     "         base64 10.32 MB 通过、10.99 MB 返回 413，故取 10,000,000 保守值。",
     "         超预算的视频会被降分辨率重编码，变换记录写进结果行。",
-    "         设为 0 或删掉该字段即完全不处理媒体。"
+    "         设为 0 或删掉该字段即完全不处理媒体。",
+    "",
+    "  attn_implementation: sdpa —— InternVL 代码把 LLM 注意力写死为",
+    "         flash_attention_2 或 eager，而 eager 会把 num_heads×seq² 的注意力",
+    "         矩阵物化成 fp32，是 Time EQA OOM 的根因。sdpa 同样不物化该矩阵，",
+    "         且 PyTorch 自带无需编译。实测 32 帧 12.55G→6.31G，160 帧可跑，",
+    "         12 道真实题目输出与 eager 逐字节相同。"
   ],
   "unify_generation": false,
   "strict_frames": false,
@@ -43,7 +49,8 @@
       "device_map": {
         "": 0
       },
-      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON.",
+      "attn_implementation": "sdpa"
     },
     "qwen": {
       "type": "openai_compatible",

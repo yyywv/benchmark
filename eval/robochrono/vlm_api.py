@@ -265,6 +265,8 @@ def runtime_config(
         # BC-11：请求体预算。默认 0 = 不做任何媒体处理，超限就让它 413 并如实记录。
         "max_request_bytes": int(provider.get("max_request_bytes", defaults.get("max_request_bytes", 0))),
         "media_cache_dir": str(provider.get("media_cache_dir", defaults.get("media_cache_dir", ""))),
+        # 加载后覆盖 LLM 的注意力实现。留空 = 不干预，保持模型代码的默认选择。
+        "attn_implementation": str(provider.get("attn_implementation", defaults.get("attn_implementation", ""))),
         "max_image_tiles": int(provider.get("max_image_tiles", defaults.get("max_image_tiles", 12))),
         "max_video_tiles": int(provider.get("max_video_tiles", defaults.get("max_video_tiles", 1))),
         "use_flash_attn": bool(provider.get("use_flash_attn", defaults.get("use_flash_attn", True))),
@@ -913,6 +915,7 @@ def load_local_internvl(
     use_flash_attn: bool,
     cuda_visible_devices: str = "",
     device_map: Any = None,
+    attn_implementation: str = "",
 ) -> tuple[Any, Any]:
     global _LOCAL_INTERNVL_MODEL, _LOCAL_INTERNVL_TOKENIZER, _LOCAL_INTERNVL_MODEL_NAME
     if (
@@ -963,6 +966,29 @@ def load_local_internvl(
             break
     if last_error is not None:
         raise last_error
+    # InternVL 的模型代码把 LLM 的注意力实现写死成二选一：
+    #     config.llm_config._attn_implementation = 'flash_attention_2' if use_flash_attn else 'eager'
+    # 而 'eager' 会把 num_heads × seq² 的注意力矩阵完整物化成 fp32 —— 这正是
+    # Time EQA OOM 的根因。第三个选项 'sdpa' 被漏掉了：它同样不物化该矩阵，
+    # 且 PyTorch 自带、无需编译安装 flash-attn。
+    #
+    # 构造函数里那行会覆盖预设的 config，所以只能加载后再改；
+    # transformers 4.57 在 forward 时按 config 分发注意力实现，因此有效。
+    #
+    # 实测（SenseNova-2B，24 GiB 4090）：
+    #     eager  32 帧 12.55 GiB，48 帧起 OOM
+    #     sdpa   32 帧  6.31 GiB，160 帧 15.98 GiB，显存随帧数线性增长
+    # 12 道真实题目上 eager 与 sdpa 的输出逐字节相同。
+    if attn_implementation:
+        language_model = getattr(_LOCAL_INTERNVL_MODEL, "language_model", None)
+        if language_model is not None:
+            language_model.config._attn_implementation = attn_implementation
+            for module in language_model.modules():
+                module_config = getattr(module, "config", None)
+                if module_config is not None and hasattr(module_config, "_attn_implementation"):
+                    module_config._attn_implementation = attn_implementation
+            print(f"  LLM attn_implementation -> {attn_implementation}", flush=True)
+
     _LOCAL_INTERNVL_TOKENIZER = AutoTokenizer.from_pretrained(
         str(model_path),
         trust_remote_code=True,
@@ -1017,6 +1043,7 @@ def request_local_internvl(runtime: dict[str, Any], parts: list[dict[str, Any]])
         runtime["use_flash_attn"],
         runtime.get("cuda_visible_devices", ""),
         runtime.get("device_map"),
+        runtime.get("attn_implementation", ""),
     )
     input_size = int(getattr(getattr(local_model, "config", None), "force_image_size", 448) or 448)
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
