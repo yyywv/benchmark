@@ -22,6 +22,9 @@ from typing import Any
 
 from . import tasks
 
+# 只有这四个任务送视频，抽帧档位对其余五个（静态图）没有意义
+VIDEO_RUNS = {"time", "understanding", "image_in_video", "planning"}
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -41,10 +44,17 @@ class RunSpec:
     model: ModelSpec
     family: str
     run: str
+    # 抽帧档位。None 表示用 provider 的默认（API 模型改不了服务端，只能如此）。
+    # 本地模型按团队定的协议跑 fps=1 与 fps=2 两档。
+    frames_fps: float | None = None
+
+    @property
+    def variant(self) -> str:
+        return "default" if self.frames_fps is None else f"fps{self.frames_fps:g}"
 
     @property
     def key(self) -> str:
-        return f"{self.model.name}__{self.family}__{self.run}"
+        return f"{self.model.name}__{self.family}__{self.run}__{self.variant}"
 
     def qa_path(self, datasets_root: Path) -> Path:
         return tasks.qa_path(datasets_root, self.family, self.run)
@@ -55,6 +65,8 @@ class Plan:
     models: list[ModelSpec] = field(default_factory=list)
     families: list[str] = field(default_factory=list)
     runs: list[str] = field(default_factory=list)
+    # 本地模型的抽帧档位。空列表 = 沿用 provider 配置，不做多档。
+    frame_variants: list[float] = field(default_factory=list)
     family_attrs: dict[str, dict[str, Any]] = field(default_factory=dict)
     skip_rules: list[dict[str, Any]] = field(default_factory=list)
 
@@ -77,6 +89,7 @@ def load_plan(path: Path) -> Plan:
         runs=[str(r) for r in raw.get("runs", tasks.ALL_RUNS)],
         family_attrs=raw.get("family_attrs", {}),
         skip_rules=raw.get("skip_rules", []),
+        frame_variants=[float(v) for v in raw.get("frame_variants", [])],
     )
 
 
@@ -118,24 +131,33 @@ def expand(
     for model in plan.models:
         if only_kind and model.kind != only_kind:
             continue
+        # 抽帧档位只对本地模型有意义 —— API 模型的抽帧在服务端，我们改不了。
+        # 送静态图的任务也不受影响，只对视频任务展开多档。
+        variants: list[float | None] = (
+            [float(v) for v in plan.frame_variants]
+            if (model.is_local and plan.frame_variants) else [None]
+        )
+
         for family in plan.families:
             for run in plan.runs:
-                spec = RunSpec(model=model, family=family, run=run)
+                run_variants = variants if run in VIDEO_RUNS else [None]
+                for fps in run_variants:
+                    spec = RunSpec(model=model, family=family, run=run, frames_fps=fps)
 
-                reason = _skipped(plan, family, run)
-                if reason:
-                    skipped.append((spec.key, reason))
-                    continue
-                if not spec.qa_path(datasets_root).exists():
-                    skipped.append((spec.key, f"QA 文件缺失 {spec.qa_path(datasets_root)}"))
-                    continue
-                if shard is not None:
-                    index, total = shard
-                    if shard_of(spec.key, total) != index - 1:
+                    reason = _skipped(plan, family, run)
+                    if reason:
+                        skipped.append((spec.key, reason))
                         continue
-                selected.append(spec)
+                    if not spec.qa_path(datasets_root).exists():
+                        skipped.append((spec.key, f"QA 文件缺失 {spec.qa_path(datasets_root)}"))
+                        continue
+                    if shard is not None:
+                        index, total = shard
+                        if shard_of(spec.key, total) != index - 1:
+                            continue
+                    selected.append(spec)
 
     # model-major：同一个模型的所有 run 连在一起，本地权重只加载一次。
     # 15 模型 × 9 任务原本要加载 135 次，排序后降到 15 次。
-    selected.sort(key=lambda s: (s.model.name, s.family, s.run))
+    selected.sort(key=lambda s: (s.model.name, s.family, s.run, s.variant))
     return selected, skipped

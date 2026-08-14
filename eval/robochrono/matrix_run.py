@@ -21,8 +21,29 @@ from .vlm_api import runtime_config
 
 
 def _store_for(spec: RunSpec, results_root: Path, runtime_meta: dict[str, Any]) -> ResultStore:
-    out_dir = results_root / spec.model.name / spec.family
+    # 抽帧档位单独分目录，fps=1 与 fps=2 的结果不会互相覆盖
+    out_dir = results_root / spec.model.name / spec.family / spec.variant
     return ResultStore(out_dir / f"{spec.run}.jsonl", meta=runtime_meta)
+
+
+def _apply_frames(runtime: dict[str, Any], spec: RunSpec) -> dict[str, Any]:
+    """把该 run 的抽帧档位写进 runtime。
+
+    frames 只影响预处理、不影响权重，所以同一次模型加载可以服务多个档位，
+    不需要为 fps=1/fps=2 各加载一遍。
+    """
+    if spec.frames_fps is None:
+        return runtime
+    runtime = dict(runtime)
+    runtime["frames"] = {
+        "mode": "fps",
+        "value": spec.frames_fps,
+        "video_sample_fps": spec.frames_fps,
+        "num_segments": 1,
+    }
+    # 团队定的口径：按实际帧数对齐，num_segments 型换算成 round(时长 × fps)
+    runtime["align_fps_to_segments"] = True
+    return runtime
 
 
 def _meta(spec: RunSpec, runtime: dict[str, Any], qa_path: Path, flags: dict[str, Any]) -> dict[str, Any]:
@@ -41,6 +62,7 @@ def _meta(spec: RunSpec, runtime: dict[str, Any], qa_path: Path, flags: dict[str
             "max_new_tokens": runtime["max_new_tokens"],
         },
         "flags": dict(flags),
+        "frames_variant": spec.variant,
     }
 
 
@@ -87,6 +109,7 @@ def _prepare(spec: RunSpec, datasets_root: Path, config_path: Path, model: Model
     qa_path = spec.qa_path(datasets_root)
     runtime = runtime_config(config_path=config_path, provider_name=model.provider,
                              default_model="", cli_model=model.model)
+    runtime = _apply_frames(runtime, spec)
     store = _store_for(spec, results_root, _meta(spec, runtime, qa_path, flags))
     if overwrite and store.path.exists():
         store.path.unlink()
@@ -136,7 +159,8 @@ def _run_local_pool(model, model_specs, *, config_path, datasets_root, results_r
         for unit in units:
             if all(str(i.get("id")) in done for i in unit.items):
                 continue
-            work.append(pool.WorkItem(spec.key, spec.run, unit.key, unit.items))
+            work.append(pool.WorkItem(spec.key, spec.run, unit.key, unit.items,
+                                      frames_fps=spec.frames_fps))
 
     if not work:
         print("  全部已完成，无需执行")
@@ -162,7 +186,7 @@ def _run_local_pool(model, model_specs, *, config_path, datasets_root, results_r
 
 
 def _write_summary(store: ResultStore, summary: dict[str, Any], spec: RunSpec) -> None:
-    path = store.path.with_name(f"{spec.run}.summary.json")
+    path = store.path.with_name(f"{spec.run}.summary.json")  # 与 jsonl 同目录，已按 variant 分开
     path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     metric = tasks.PRIMARY_METRIC[spec.run]
     print(f"  {spec.family}/{spec.run}: {metric} = {summary.get(metric)}  "

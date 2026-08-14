@@ -43,6 +43,8 @@ class WorkItem:
     run: str
     unit_key: str
     items: list[dict[str, Any]]
+    # 抽帧档位。frames 只影响预处理，所以同一次模型加载可以服务多个档位。
+    frames_fps: float | None = None
 
 
 @dataclass
@@ -104,6 +106,12 @@ def _worker(
         from .tasks.base import Unit
 
         unit = Unit(key=item.unit_key, items=item.items)
+        if item.frames_fps is not None:
+            runtime["frames"] = {
+                "mode": "fps", "value": item.frames_fps,
+                "video_sample_fps": item.frames_fps, "num_segments": 1,
+            }
+            runtime["align_fps_to_segments"] = True
         meta: dict[str, Any] = {}
         try:
             _, text = call_vlm(runtime, task.parts(unit), meta)

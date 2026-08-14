@@ -66,6 +66,40 @@
       "type": "replay",
       "model": "replay",
       "require_api_key": false
+    },
+    "local_rynnbrain_2b": {
+      "type": "local_transformers_vlm",
+      "model": "models/RynnBrain-2B",
+      "model_env": "RYNNBRAIN_2B_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "device_map": {
+        "": 0
+      },
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+    },
+    "local_cosmos3_edge_2b": {
+      "type": "local_cosmos_transformers",
+      "model": "models/Cosmos3-Edge",
+      "model_env": "COSMOS3_EDGE_MODEL_PATH",
+      "timeout": 1800,
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "device_map": {
+        "": 0
+      },
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
+    },
+    "local_qwen": {
+      "type": "local_qwen",
+      "model": "models/Qwen3-VL-8B-Instruct",
+      "model_env": "QWEN3_VL_MODEL_PATH",
+      "temperature": 0.0,
+      "max_new_tokens": 1024,
+      "device_map": {
+        "": 0
+      },
+      "system_prompt": "You are a strict JSON API. Return only one JSON object. Do not include markdown or analysis outside JSON."
     }
   }
 }

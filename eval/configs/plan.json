@@ -6,26 +6,48 @@
     "另外 14 个模型和 19 个族的数据到位后往这里加即可，代码不用动。",
     "",
     "kind: local 走本地权重（model-major 调度，权重只加载一次）",
-    "      api   走远程接口（可并发，需要预算闸门）"
+    "      api   走远程接口（可并发，需要预算闸门）",
+    "",
+    "frame_variants: 本地模型统一测 fps=1 与 fps=2 两档（团队定案）。",
+    "  API 模型的抽帧在服务端，无法调整，只按默认跑一档。",
+    "  该档位只对四个视频任务展开；五个静态图任务不受影响。",
+    "  frames 只影响预处理不影响权重，所以两档共用同一次模型加载。"
   ],
-
   "models": [
     {
       "name": "SenseNova-SI-1.1-InternVL3-2B",
       "provider": "local_sensenova_si_1_1_internvl3_2b",
       "kind": "local",
-      "note": "15 个模型里最小的开源模型，权重 4.18 GB，用作链路验证"
+      "note": "adapter: local_internvl，权重 4.18 GB"
+    },
+    {
+      "name": "RynnBrain-2B",
+      "provider": "local_rynnbrain_2b",
+      "kind": "local",
+      "note": "adapter: local_transformers_vlm，权重 4.88 GB"
+    },
+    {
+      "name": "Cosmos3-Edge-2B",
+      "provider": "local_cosmos3_edge_2b",
+      "kind": "local",
+      "note": "adapter: local_cosmos_transformers，定位存疑见调研 #7"
+    },
+    {
+      "name": "Qwen3-VL-8B-Instruct",
+      "provider": "local_qwen",
+      "kind": "local",
+      "note": "adapter: local_qwen，权重 17.53 GB"
     },
     {
       "name": "qwen3.8-max",
       "provider": "qwen",
       "kind": "api",
-      "note": "待 DASHSCOPE_API_KEY 配好后启用"
+      "note": "抽帧由服务端决定，不参与 fps 档位"
     }
   ],
-
-  "families": ["stack_cubes"],
-
+  "families": [
+    "stack_cubes"
+  ],
   "runs": [
     "time",
     "understanding",
@@ -37,16 +59,20 @@
     "trajectory_2D",
     "trajectory_3D"
   ],
-
   "family_attrs": {
-    "stack_cubes": { "two_handed": true }
+    "stack_cubes": {
+      "two_handed": true
+    }
   },
-
   "skip_rules": [
     {
       "run": "left_right",
       "unless": "two_handed",
       "_why": "视角识别依赖左右手视角差异，单手任务不适用（见 test/testproject.md）"
     }
+  ],
+  "frame_variants": [
+    1.0,
+    2.0
   ]
 }
