@@ -61,9 +61,20 @@ eval/
 
 | 测试 | 覆盖 | 结果 |
 | --- | --- | --- |
+| `test_request_equivalence` | 9 任务 × 12 unit，**发给模型的 prompt 与媒体** | **prompt 逐字节相同，媒体类型/路径/顺序相同** |
 | `test_parsing_equivalence` | 6 任务 × 40 题 × 20 种输出形态 | **4,800 条比对，零不一致** |
 | `test_replay_regression` | 9 任务的打分与汇总 | **130 条，逐字段零差异** |
 | `test_engine_replay` | engine + store + 断点，全链路 | **9 任务零差异，断点正确** |
+
+四套测试合起来构成闭环：**相同输入 → 相同输出 → 相同分数**。
+前三套分别锁住链路的一段，缺任何一段都不足以断言「结果一致」——
+replay 只证明「给定相同模型输出算出相同分数」，它跳过了 prompt 比对；
+`test_request_equivalence` 是后来补的，专门堵这个缺口。
+
+**尚未验证的部分（如实记录）：**样本量有限（每任务 12 个 unit / 10 道题，非穷尽）；
+只覆盖 `stack_cubes` 一族，其余族的数据形态可能不同；
+真实权重只跑过 `local_internvl` 这一条 adapter，另外三条
+（`local_qwen` / `local_transformers_vlm` / `local_cosmos_transformers`）尚无权重可验。
 
 回归数据是**冻结脚本跑真实模型录下来的输出**，所以任何改动都能立刻验证
 有没有动到评分，不用重新占卡。
