@@ -120,16 +120,25 @@ def expand(
     *,
     shard: tuple[int, int] | None = None,
     only_kind: str | None = None,
+    only_models: list[str] | None = None,
 ) -> tuple[list[RunSpec], list[tuple[str, str]]]:
     """展开矩阵。返回 (要跑的 run 列表, [(key, 跳过原因)])。
 
     ``shard`` 形如 (1, 4) 表示「四台机器里的第一台」。
+    ``only_models`` 限定模型名 —— 按模型分派不同 python 环境时用到。
     """
     selected: list[RunSpec] = []
     skipped: list[tuple[str, str]] = []
+    wanted = set(only_models) if only_models else None
+    if wanted:
+        unknown = wanted - {m.name for m in plan.models}
+        if unknown:
+            raise ValueError(f"plan 里没有这些模型：{sorted(unknown)}")
 
     for model in plan.models:
         if only_kind and model.kind != only_kind:
+            continue
+        if wanted and model.name not in wanted:
             continue
         # 抽帧档位只对本地模型有意义 —— API 模型的抽帧在服务端，我们改不了。
         # 送静态图的任务也不受影响，只对视频任务展开多档。

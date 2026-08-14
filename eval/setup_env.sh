@@ -14,14 +14,15 @@
 #             模型构造函数并报 unexpected keyword argument 'dtype'
 #   4.56.2  ✓ 可用，但低于 RynnBrain-2B 官方要求的 4.57.1
 #   4.57.6  ✓ 9/9 项检查全通过，且满足 RynnBrain-2B 的 ≥4.57.1
-#   5.2.0   ✗ InternVL 的自定义代码在 meta device 下构造会崩：
-#             modeling_intern_vit.py 里 [x.item() for x in torch.linspace(...)]
-#             报 "Tensor.item() cannot be called on meta tensors"。
-#             low_cpu_mem_usage / device_map 各种组合都试过，均失败；
-#             打补丁改掉那一行后仍有其他同类问题，是个无底洞。
+#   5.2.0   ✗ InternVL 自定义代码在 meta device 下构造崩溃
+#   5.15.0  ✗ meta tensor 那个问题没了，但换成 InternVLChatModel 缺少
+#             all_tied_weights_keys —— 5.x 基类 API 变了，自定义代码没跟上
 #
-# 唯一不被 4.57.6 覆盖的是 RynnBrain1.1-2B（官方要求 transformers==5.2.0），
-# 它需要单独一个环境。
+# 不被 4.57.6 覆盖的模型走 Group B（transformers 5.15.0），
+# 见 configs/environments.json 与 envs/groupB.txt。
+#
+# 依赖清单的唯一来源是 envs/groupA.txt —— 本脚本与 tools/setup_envs.sh（uv 版）
+# 都从它读，避免两处版本号各写各的。
 set -euo pipefail
 
 ENV_NAME="${ENV_NAME:-robochrono}"
@@ -35,39 +36,19 @@ conda create -y -n "${ENV_NAME}" python=3.11
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate "${ENV_NAME}"
 
-echo "==> 安装 PyTorch (CUDA 12.4)"
-pip install -i "${PIP_INDEX}" torch==2.6.0 torchvision==0.21.0
-
-echo "==> 安装推理与数据依赖"
-# transformers 版本经实测选定为 4.57.6，理由见下方注释与
-# eval/docs/official_config_survey.md 的分歧 #6。
-pip install -i "${PIP_INDEX}" \
-    "transformers==4.57.6" \
-    "accelerate==1.6.0" \
-    "einops==0.8.1" \
-    "timm==1.0.15" \
-    "sentencepiece==0.2.0" \
-    "protobuf==6.33.1" \
-    "qwen-vl-utils==0.0.14" \
-    "decord==0.6.0" \
-    "opencv-python-headless==4.11.0.86" \
-    "pillow==11.1.0" \
-    "numpy==1.26.4" \
-    "pandas==2.2.3" \
-    "requests==2.32.3" \
-    "huggingface_hub==0.30.2" \
-    "pyyaml==6.0.2" \
-    "tqdm==4.67.1"
+echo "==> 安装依赖（来自 envs/groupA.txt）"
+pip install -i "${PIP_INDEX}" -r "$(dirname "$0")/envs/groupA.txt"
 
 echo
 echo "==> 自检"
 python - <<'PY'
-import torch, transformers, cv2, decord, PIL, numpy, pandas, requests, yaml
+import torch, transformers, cv2, decord, PIL, numpy, requests
 print(f"  torch        {torch.__version__}  cuda={torch.cuda.is_available()}  gpus={torch.cuda.device_count()}")
 print(f"  transformers {transformers.__version__}")
 print(f"  opencv       {cv2.__version__}")
 print(f"  decord       ok")
 print(f"  numpy        {numpy.__version__}")
+import huggingface_hub as hh; print(f"  hf_hub       {hh.__version__}")
 PY
 
 echo

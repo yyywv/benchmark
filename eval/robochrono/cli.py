@@ -19,13 +19,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import engine, matrix, matrix_run, pool, preflight, report, tasks
+from . import dispatch, engine, matrix, matrix_run, pool, preflight, report, tasks
 from .store import ResultStore
 from .tasks.base import load_items
 from .vlm_api import runtime_config
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs/providers.json"
 DEFAULT_PLAN = Path(__file__).resolve().parents[1] / "configs/plan.json"
+DEFAULT_ENVIRONMENTS = Path(__file__).resolve().parents[1] / "configs/environments.json"
+EVAL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASETS = Path(__file__).resolve().parents[1] / "datasets"
 DEFAULT_RESULTS = Path(__file__).resolve().parents[1] / "results"
 KEYS_FILE = Path.home() / ".config/robochrono/keys.env"
@@ -159,6 +161,7 @@ def _expand(args: argparse.Namespace):
         Path(args.datasets_root),
         shard=_parse_shard(getattr(args, "shard", None)),
         only_kind=getattr(args, "only", None),
+        only_models=getattr(args, "models", None),
     )
 
 
@@ -208,8 +211,33 @@ def cmd_matrix(args: argparse.Namespace) -> int:
         limit_items=args.limit_items,
         limit_groups=args.limit_groups,
         overwrite=args.overwrite,
+        api_concurrency=args.api_concurrency,
+        api_rate_limit=args.api_rate_limit,
     )
     return 1 if failures else 0
+
+
+def cmd_dispatch(args: argparse.Namespace) -> int:
+    """按模型所属环境分派子进程。见 robochrono/dispatch.py 的说明。"""
+    plan = matrix.load_plan(Path(args.plan))
+    env_config = dispatch.load_environments(Path(args.environments))
+
+    passthrough = list(args.matrix_args)
+    # argparse 的 REMAINDER 会把分隔用的 -- 留在列表里
+    while passthrough and passthrough[0] == "--":
+        passthrough.pop(0)
+    if not passthrough or passthrough[0] != "matrix":
+        passthrough = ["matrix", *passthrough]
+    if "--plan" not in passthrough:
+        passthrough += ["--plan", str(Path(args.plan).resolve())]
+
+    return dispatch.run(
+        env_config,
+        [m.name for m in plan.models],
+        passthrough,
+        eval_root=EVAL_ROOT,
+        dry_run=args.dry_run,
+    )
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -288,12 +316,28 @@ def main(argv: list[str] | None = None) -> int:
     matrix_parser.add_argument("--shard", default=None, help="形如 1/4，多机分工用")
     matrix_parser.add_argument("--only", choices=["local", "api"], default=None)
     matrix_parser.add_argument("--gpus", type=int, default=None, help="使用前 N 张卡，默认全部")
+    matrix_parser.add_argument("--models", nargs="+", default=None,
+                               help="只跑这些模型（名字取自 plan.json），按环境分派时用")
+    matrix_parser.add_argument("--api-concurrency", type=int, default=None,
+                               help="API 模型的并发请求数，覆盖 providers.json；本地模型不受影响")
+    matrix_parser.add_argument("--api-rate-limit", type=float, default=None,
+                               help="API 每秒请求上限，0 为不限")
     matrix_parser.add_argument("--limit-items", type=int, default=None)
     matrix_parser.add_argument("--limit-groups", type=int, default=None)
     matrix_parser.add_argument("--overwrite", action="store_true")
     matrix_parser.add_argument("--strip-reasoning", action="store_true")
     matrix_parser.add_argument("--null-text-fix", action="store_true")
     matrix_parser.set_defaults(func=cmd_matrix)
+
+    dispatch_parser = sub.add_parser(
+        "dispatch",
+        help="按 environments.json 把各模型分派到对应的 python 环境后跑矩阵")
+    dispatch_parser.add_argument("--plan", default=str(DEFAULT_PLAN))
+    dispatch_parser.add_argument("--environments", default=str(DEFAULT_ENVIRONMENTS))
+    dispatch_parser.add_argument("--dry-run", action="store_true", help="只打印将要执行的命令")
+    dispatch_parser.add_argument("matrix_args", nargs=argparse.REMAINDER,
+                                 help="-- 之后的参数原样透传给 matrix，例如 -- --gpus 8 --only local")
+    dispatch_parser.set_defaults(func=cmd_dispatch)
 
     report_parser = sub.add_parser("report", help="汇总结果成对比表")
     report_parser.add_argument("results_dirs", nargs="*", type=Path,

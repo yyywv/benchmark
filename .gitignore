@@ -16,6 +16,9 @@ models/
 # Backups left by the QA path-normalization pass (BC-08)
 *.orig
 
+# uv 建的虚拟环境（每套几 GB，由 envs/*.txt 重建）
+.venvs/
+
 # Common local/runtime artifacts
 .env
 .venv/
